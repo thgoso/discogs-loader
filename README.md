@@ -1,6 +1,6 @@
 # discogs-loader
 
-This littel bash script shows you the data from a discogs release if you have the release number.
+This little bash script shows you the data from a discogs release if you have the release number.
 
 **Usage: discogs-loader rel-no [Optional your discogs-token]**
 
