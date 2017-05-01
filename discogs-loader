@@ -162,14 +162,14 @@ function show_styles
 }
 # ------------------------------------------------------------------------------------------------------------------
 # show picture url's
-function show_picurls ()
+function show_picurls
 {
   unset tmp
   tmp=$(echo "$reldata" | jq '.images[0].resource_url')
   if ! [ "$tmp" == "null" ] ; then
     IFS=$'\n'
     unset tmp
-    tmp=($(echo "$reldata" | jq '.images[0].resource_url' | awk '{print substr($0, 2, length($0)-2)}'))
+    tmp=($(echo "$reldata" | jq '.images[].resource_url' | awk '{print substr($0, 2, length($0)-2)}'))
     IFS="$sep"
     if [ -n "$tmp" ] ; then
       echo -e "PICURLS$sep${tmp[*]}"
