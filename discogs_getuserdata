@@ -1,0 +1,187 @@
+#!/bin/bash
+
+# Download/show user-data from discogs.com
+# Usage: discogs_getuserdata user-name [OPTIONAL user-discogs-token]
+# prints out user-data to stdout
+# Eeverithing is shown if the user has a public collection OR
+# YOU are the user and have a private collection but your user-discogs-token
+# Please do not use YOUR user-discogs-token if you want to show NOT YOUR user-info
+
+# Copyright (C) 2017 Thomas Gollmer, th_goso@freenet.de
+# Dieses Programm ist freie Software. Sie können es unter den Bedingungen der GNU General Public License,
+# wie von der Free Software Foundation veröffentlicht, weitergeben und/oder modifizieren,
+# entweder gemäß Version 3 der Lizenz oder (nach Ihrer Option) jeder späteren Version.
+# Die Veröffentlichung dieses Programms erfolgt in der Hoffnung, daß es Ihnen von Nutzen sein wird,
+# aber OHNE IRGENDEINE GARANTIE, sogar ohne die implizite Garantie der
+# MARKTREIFE oder der VERWENDBARKEIT FÜR EINEN BESTIMMTEN ZWECK.
+# Details finden Sie in der GNU General Public License. Sie sollten ein Exemplar der GNU General Public License
+# zusammen mit diesem Programm erhalten haben. Falls nicht, siehe <http://www.gnu.org/licenses/>.
+
+
+# output format: (seperator = TAB)
+# output is always 2 Fields "VALUE_STRING TAB value"
+# "DROPDOWN_VALUES" can have more than two fields...
+# "DROPDOWN_VALUES    value1   value2   value3   ..."
+
+# possible value-strings are:
+# "USERNAME" "NAME" "HOMEPAGE" "USER_ID" "LOCATION" "CURRENCY" "REGISTERED" "NUMBER_OF_ITEMS_IN_COLLECTION"
+# "NUMBER_OF_ITEMS_IN_WANTLIST" "NUMBER_OF_LISTS" "NUMBER_OF_RELEASES_CONTRIBUTED" "NUMBER_OF_RELEASES_PENDING"
+# "RANK" "NUMBER_OF_RELEASES_RATED" "RATING_AVERAGE" "NUMBER_FOR_SALE"
+# "SELLER_NUMBER_OF_RATINGS" "SELLER_RATING_PERCENT" "SELLER_RATING_STARS"
+# "BUYER_NUMBER_OF_RATINGS" "BUYER_RATING_PERCENT" "BUYER_RATING_STARS"
+# "FOLDER_NAME" "FOLDER_ID" "FOLDER_URL" "FOLDER_ITEMS"
+# "TEXTFIELD_NAME" "TEXTFIELD_ID" "TEXTFIELD_POS" "TEXTFIELD_PUBLIC" "TEXTFIELD_LINES"
+# "DROPDOWNFIELD_NAME" "DROPDOWNFIELD_ID" "DROPDOWNFIELD_POS" "DROPDOWNFIELD_PUBLIC" "DROPDOWN_VALUES"
+
+
+# Agent for curl
+d_agent="github.com/thgoso/discogs-loader/"
+# Discogs-Page
+d_userpage="https://api.discogs.com/users"
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# parse json-value from "$userdata"
+# print data in formated form if not empty ("null" or "")
+# param: value-string description-string
+function print_item ()
+{
+  tmp=$(echo "$userdata" | jq -r "$1")
+
+  if ! [ "$tmp" = "null" ] ; then
+    if [ -n "$tmp" ] ; then
+      echo -e "$2\t$tmp"
+    fi
+  fi
+}
+# ------------------------------------------------------------------------------------------------------------------
+# Main
+
+# save json-data for user in "$userdata"
+if [ -n "$2" ] ; then
+  userdata=$(curl --stderr /dev/null -A "$d_agent" "$d_userpage/$1" -H "Authorization: Discogs token=$2")
+else
+  userdata=$(curl --stderr /dev/null -A "$d_agent" "$d_userpage/$1")
+fi
+retval="$?"
+
+# end if error
+if [ "$retval" != "0" ] ; then
+  echo "Error while downloading !" >&2
+  echo "\"curl\" retruns: $retval" >&2
+  exit 1
+fi
+if [ "$userdata" = '{"message": "User does not exist or may have been deleted."}' ]; then
+  echo "Can't find user $1 !" >&2
+  exit 1
+fi
+if [ "$userdata" = '{"message": "Invalid consumer token. Please register an app before making requests."}' ] ; then
+  echo "Wrong combination user-name / user-token ! Use only YOUR user-name with YOUR user-token" >&2
+  echo "When downloading user-infos from other users, do not use any token" >&2
+  exit 1
+fi
+
+# print out item values
+print_item ".username" "USERNAME"
+print_item ".name" "NAME"
+print_item ".home_page" "HOMEPAGE"
+print_item ".id" "USER_ID"
+print_item ".location" "LOCATION"
+print_item ".curr_abbr" "CURRENCY"
+print_item ".registered" "REGISTERED"
+print_item ".num_collection" "NUMBER_OF_ITEMS_IN_COLLECTION"
+print_item ".num_wantlist" "NUMBER_OF_ITEMS_IN_WANTLIST"
+print_item ".num_lists" "NUMBER_OF_LISTS"
+print_item ".releases_contributed" "NUMBER_OF_RELEASES_CONTRIBUTED"
+print_item ".num_pending" "NUMBER_OF_RELEASES_PENDING"
+print_item ".rank" "RANK"
+print_item ".releases_rated" "NUMBER_OF_RELEASES_RATED"
+print_item ".rating_avg" "RATING_AVERAGE"
+print_item ".num_for_sale" "NUMBER_FOR_SALE"
+print_item ".seller_num_ratings" "SELLER_NUMBER_OF_RATINGS"
+print_item ".seller_rating" "SELLER_RATING_PERCENT"
+print_item ".seller_rating_stars" "SELLER_RATING_STARS"
+print_item ".buyer_num_ratings" "BUYER_NUMBER_OF_RATINGS"
+print_item ".buyer_rating" "BUYER_RATING_PERCENT"
+print_item ".buyer_rating_stars" "BUYER_RATING_STARS"
+
+# load folder-data for user
+if [ -n "$2" ] ; then
+  folderdata=$(curl --stderr /dev/null -A "$d_agent" "$d_userpage/$1/collection/folders" -H "Authorization: Discogs token=$2")
+else
+  folderdata=$(curl --stderr /dev/null -A "$d_agent" "$d_userpage/$1/collection/folders")
+fi
+retval="$?"
+
+# end if error
+if [ "$retval" != "0" ] ; then
+  echo "Error while downloading !" >&2
+  echo "\"curl\" retruns: $retval" >&2
+  exit 1
+fi
+
+# show folder-data
+last_folder=$(echo "$folderdata" | jq -r '.folders | length')
+
+for ((folder_cnt=0;folder_cnt<last_folder;folder_cnt++)) ; do
+  folder_name=$(echo "$folderdata" | jq -r ".folders[$folder_cnt].name")
+  folder_id=$(echo "$folderdata" | jq -r ".folders[$folder_cnt].id")
+  folder_url=$(echo "$folderdata" | jq -r ".folders[$folder_cnt].resource_url")
+  folder_items=$(echo "$folderdata" | jq -r ".folders[$folder_cnt].count")
+  echo -e "FOLDER_NAME\t${folder_name}"
+  echo -e "FOLDER_ID\t${folder_id}"
+  echo -e "FOLDER_URL\t${folder_url}"
+  echo -e "FOLDER_ITEMS\t${folder_items}"
+done
+
+# load custom-fields for user
+if [ -n "$2" ] ; then
+  customdata=$(curl --stderr /dev/null -A "$d_agent" "$d_userpage/$1/collection/fields" -H "Authorization: Discogs token=$2")
+else
+  customdata=$(curl --stderr /dev/null -A "$d_agent" "$d_userpage/$1/collection/fields")
+fi
+retval="$?"
+
+# end if error
+if [ "$retval" != "0" ] ; then
+  echo "Error while downloading !" >&2
+  echo "\"curl\" retruns: $retval" >&2
+  exit 1
+fi
+
+# show custom-fields
+last_field=$(echo "$customdata" | jq -r '.fields | length')
+
+for ((field_cnt=0;field_cnt<last_field;field_cnt++)) ; do
+  field_name=$(echo "$customdata" | jq -r ".fields[$field_cnt].name")
+  field_id=$(echo "$customdata" | jq -r ".fields[$field_cnt].id")
+  field_pos=$(echo "$customdata" | jq -r ".fields[$field_cnt].position")
+  field_public=$(echo "$customdata" | jq -r ".fields[$field_cnt].public")
+  field_type=$(echo "$customdata" | jq -r ".fields[$field_cnt].type")
+
+
+  if [ "$field_type" = "textarea" ] ; then
+    field_lines=$(echo "$customdata" | jq -r ".fields[$field_cnt].lines")
+    echo -e "TEXTFIELD_NAME\t$field_name"
+    echo -e "TEXTFIELD_ID\t$field_id"
+    echo -e "TEXTFIELD_POS\t$field_pos"
+    echo -e "TEXTFIELD_PUBLIC\t$field_public"
+    echo -e "TEXTFIELD_LINES\t$field_lines"
+  elif [ "$field_type" = "dropdown" ] ; then
+    old_IFS="$IFS"
+    IFS=$'\t'
+    last_op=$(echo "$customdata" | jq -r ".fields[$field_cnt].options | length")
+    unset field_ops
+    for ((op_cnt=0;op_cnt<last_op;op_cnt++)) ; do
+      field_ops+=($(echo "$customdata" | jq -r ".fields[$field_cnt].options[$op_cnt]"))
+    done
+    echo -e "DROPDOWNFIELD_NAME\t$field_name"
+    echo -e "DROPDOWNFIELD_ID\t$field_id"
+    echo -e "DROPDOWNFIELD_POS\t$field_pos"
+    echo -e "DROPDOWNFIELD_PUBLIC\t$field_public"
+    echo -e "DROPDOWN_VALUES\t${field_ops[*]}"
+    IFS="$old_IFS"
+  fi
+done
+
+exit 0
