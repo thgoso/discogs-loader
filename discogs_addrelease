@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# Add release to your colletion on discogs.com
+# Usage: discogs_addrelease user-token user-name folder-number release-number
+#
+# Return in stdout: instance_id (different from 0) if adding was successfull or "0" if there was an error
+
+
+# Copyright (C) 2016-2017 Thomas Gollmer, th_goso@freenet.de
+# Dieses Programm ist freie Software. Sie können es unter den Bedingungen der GNU General Public License,
+# wie von der Free Software Foundation veröffentlicht, weitergeben und/oder modifizieren,
+# entweder gemäß Version 3 der Lizenz oder (nach Ihrer Option) jeder späteren Version.
+# Die Veröffentlichung dieses Programms erfolgt in der Hoffnung, daß es Ihnen von Nutzen sein wird,
+# aber OHNE IRGENDEINE GARANTIE, sogar ohne die implizite Garantie der
+# MARKTREIFE oder der VERWENDBARKEIT FÜR EINEN BESTIMMTEN ZWECK.
+# Details finden Sie in der GNU General Public License. Sie sollten ein Exemplar der GNU General Public License
+# zusammen mit diesem Programm erhalten haben. Falls nicht, siehe <http://www.gnu.org/licenses/>.
+
+
+# Agent for curl
+d_agent="github.com/thgoso/discogs-loader/"
+# Discogs-Page
+d_userpage="https://api.discogs.com/users/"
+
+
+# if adding release is successfull, a "instance_id" will be returned
+ret=$(curl --stderr /dev/null -A "$d_agent" -H "Authorization: Discogs token=$1" \
+  -X POST "${d_userpage}$2/collection/folders/$3/releases/$4" | jq -r '.instance_id')
+
+if [ "$ret" = "null" ] ; then
+  echo "0"
+  exit 1
+else
+  echo "$ret"
+  exit 0
+fi
+
+
