@@ -38,4 +38,5 @@ Loads all the data from a user and prints data out to stdout.
 ## discogs_addrelease
 Adding a release to your discogs-collection
 - usage: discogs_addrelease user-token user-name folder-number release-number
+
 you can use "1" for folder-number if you want to add in folder "uncategorized" or any other existing folder-number from your collection
