@@ -36,7 +36,13 @@ Loads all the data from a user and prints data out to stdout.
 - usage: discogs_getuserdata user-name [OPTIONAL user-token]
 
 ## discogs_addrelease
-Adding a release to your discogs-collection
+Adding a release to your discogs-collection.
 - usage: discogs_addrelease user-token user-name folder-number release-number
 
 you can use "1" for folder-number if you want to add in folder "uncategorized" or any other existing folder-number from your collection
+
+## discogs_writecustom
+Write custom-field in your collection.
+- usage: discogs_writecustom user-token user-name folder-number release-number instance-number field-id json-string
+
+json-string must be formated in the right way like '"text"' (including doubble-quotes)
