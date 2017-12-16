@@ -36,8 +36,8 @@ mkdir "$e_tempfolder"
 # Let the user enter user-name, user-token and save data in "$d_username" & "$d_usertoken"
 # set sleeptime 1 or 3 seconds
 # with usertoken you can make 60 server requests per minute, without only 25
-echo "... Discogs-Export ..."
-echo "Enter your user-name and user-token if you are the owner of the collection."
+echo "--------------------------- DISCOGS EXPORT ----------------------------"
+echo "Enter user-name and user-token if you are the owner of the collection."
 echo "You can also read data from other users, if the collection is public."
 echo "In this case only enter the user-name and press <ENTER> for user-token."
 read -p "user-name: " d_username
@@ -103,7 +103,7 @@ else
 fi
 
 d_folders=$(echo "$data" | jq -r '.folders | length')
-echo "in $d_folders folder(s)"
+echo "in $d_folders folders"
 echo "$data" > "${e_tempfolder}/folderdata.json"
 
 # clean, wait
