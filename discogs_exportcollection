@@ -92,11 +92,6 @@ sleep "$d_sleeptime"
 if [ -n "$d_usertoken" ] ; then
   data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username/collection/folders" \
     -H "Authorization: Discogs token=$d_usertoken")
-  # if we are the owner, we do not need folder0 = ALL-FOLDER
-  # all the data we need is in the other folders
-  # erase folder0 in list
-  del_idx=$(echo "$data" | jq '.folders[].id' | grep -n '0' | awk -F ":" '{print $1 -1}')
-  data=$(echo "$data" | jq "del(.folders[$del_idx])")
 else
   # in public collection we can only read folder0 = ALL-FOLDER and no other
   data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username/collection/folders")
