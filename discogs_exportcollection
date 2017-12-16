@@ -1,0 +1,204 @@
+#!/bin/bash
+
+# Usage: discogs_exportcollection
+
+# Export your own or any public collection and wantlist including custom fields and folders
+
+# If you want to export YOUR collection you need a user-token to download all the data
+# From any other user-collection you can export:
+# Only the items in folder0 = folder with all items in collection
+# Only custom fields which are set to public
+# Items in wantlist
+
+# Copyright (C) 2017 Thomas Gollmer, th_goso@freenet.de
+# Dieses Programm ist freie Software. Sie können es unter den Bedingungen der GNU General Public License,
+# wie von der Free Software Foundation veröffentlicht, weitergeben und/oder modifizieren,
+# entweder gemäß Version 3 der Lizenz oder (nach Ihrer Option) jeder späteren Version.
+# Die Veröffentlichung dieses Programms erfolgt in der Hoffnung, daß es Ihnen von Nutzen sein wird,
+# aber OHNE IRGENDEINE GARANTIE, sogar ohne die implizite Garantie der
+# MARKTREIFE oder der VERWENDBARKEIT FÜR EINEN BESTIMMTEN ZWECK.
+# Details finden Sie in der GNU General Public License. Sie sollten ein Exemplar der GNU General Public License
+# zusammen mit diesem Programm erhalten haben. Falls nicht, siehe <http://www.gnu.org/licenses/>.
+
+
+
+# Agent for curl
+d_agent="github.com/thgoso/discogs-loader/"
+# Discogs-API-Page
+d_page="https://api.discogs.com"
+# tempfolder
+e_tempfolder="/tmp/discogsexport"
+# ------------------------------------------------------------------------------------------------------------------
+# Create new tempfolder
+rm -f -r -d "$e_tempfolder"
+mkdir "$e_tempfolder"
+# ------------------------------------------------------------------------------------------------------------------
+# Let the user enter user-name, user-token and save data in "$d_username" & "$d_usertoken"
+# set sleeptime 1 or 3 seconds
+# with usertoken you can make 60 server requests per minute, without only 25
+echo "... Discogs-Export ..."
+echo "Enter your user-name and user-token if you are the owner of the collection."
+echo "You can also read data from other users, if the collection is public."
+echo "In this case only enter the user-name and press <ENTER> for user-token."
+read -p "user-name: " d_username
+read -p "user-token: " d_usertoken
+
+if [ -z "$d_usertoken" ] ; then
+  d_sleeptime="3"
+else
+  d_sleeptime="1"
+fi
+# ------------------------------------------------------------------------------------------------------------------
+# Load userdata and save in file named "userdata.json" in tempfolder
+# Show Info or exit on error
+if [ -n "$d_usertoken" ] ; then
+  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username" \
+    -H "Authorization: Discogs token=$d_usertoken")
+else
+  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username")
+fi
+
+d_username=$(echo "$data" | jq -r '.username')
+d_numcollection=$(echo "$data" | jq -r '.num_collection')
+
+if [ "$d_username" = "null" ] ; then
+  echo "User does not exists !" >&2
+  rm -f -r -d "$e_tempfolder"
+  exit 1
+fi
+
+if [ "$d_numcollection" = "null" ] ; then
+  echo "Empty or private collection !" >&2
+  rm -f -r -d "$e_tempfolder"
+  exit 1
+fi
+
+if [ "$d_numcollection" = "0" ] ; then
+  echo "Empty or private collection !" >&2
+  rm -f -r -d "$e_tempfolder"
+  exit 1
+fi
+
+echo "$d_username has $d_numcollection items"
+echo "$data" > "${e_tempfolder}/userdata.json"
+
+# clean, wait
+unset data
+unset d_numcollection
+sleep "$d_sleeptime"
+# ------------------------------------------------------------------------------------------------------------------
+# Load folder-infos and save in file named "folderdata.json" in tempfolder
+# Show Info
+if [ -n "$d_usertoken" ] ; then
+  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username/collection/folders" \
+    -H "Authorization: Discogs token=$d_usertoken")
+  # if we are the owner, we do not need folder0 = ALL-FOLDER
+  # all the data we need is in the other folders
+  # erase folder0 in list
+  del_idx=$(echo "$data" | jq '.folders[].id' | grep -n '0' | awk -F ":" '{print $1 -1}')
+  data=$(echo "$data" | jq "del(.folders[$del_idx])")
+else
+  # in public collection we can only read folder0 = ALL-FOLDER and no other
+  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username/collection/folders")
+fi
+
+d_folders=$(echo "$data" | jq -r '.folders | length')
+echo "in $d_folders folder(s)"
+echo "$data" > "${e_tempfolder}/folderdata.json"
+
+# clean, wait
+unset del_idx
+unset data
+unset d_folders
+sleep "$d_sleeptime"
+# ------------------------------------------------------------------------------------------------------------------
+# Load fields-infos and save in file named "fieldsdata.json" in tempfolder
+# Show Info
+if [ -n "$d_usertoken" ] ; then
+  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username/collection/fields" \
+    -H "Authorization: Discogs token=$d_usertoken")
+else
+  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username/collection/fields")
+fi
+
+d_fields=$(echo "$data" | jq -r '.fields | length')
+echo "with $d_fields custom-fields"
+echo "$data" > "${e_tempfolder}/fieldsdata.json"
+
+# clean, wait
+unset data
+unset d_fields
+sleep "$d_sleeptime"
+# ------------------------------------------------------------------------------------------------------------------
+# Load collection-files and save in files named "collectionfolder_X_page_Y.json"
+# in tempfolder; X = folder-number Y = page-number
+# Show Info
+d_folderids=($(cat "${e_tempfolder}/folderdata.json" | jq '.folders[].id'))
+for d_curfolder in "${d_folderids[@]}" ; do
+  d_pagecnt="1"
+  d_curpage="$d_page/users/$d_username/collection/folders/${d_curfolder}/releases?per_page=100&page=1"
+
+  until [ "$d_curpage" = "null" ] ; do
+    if [ -n "$d_usertoken" ] ; then
+      data=$(curl --stderr /dev/null -A "$d_agent" "$d_curpage" -H "Authorization: Discogs token=$d_usertoken")
+    else
+      data=$(curl --stderr /dev/null -A "$d_agent" "$d_curpage")
+    fi
+
+    d_numpages=$(echo "$data" | jq -r '.pagination.pages')
+    echo "Load collection folder ${d_curfolder} page ${d_pagecnt}/${d_numpages}"
+
+    echo "$data" > "${e_tempfolder}/collectionfolder_${d_curfolder}_page_${d_pagecnt}.json"
+    ((d_pagecnt++))
+    d_curpage=$(echo "$data" | jq -r '.pagination.urls.next')
+    sleep "$d_sleeptime"
+  done
+done
+
+# clean
+unset data
+unset d_folderids
+unset d_curfolder
+unset d_pagecnt
+unset d_curpage
+unset d_numpages
+# ------------------------------------------------------------------------------------------------------------------
+# Load wantlist-files and save in files named "wantlist_X.json" in tempfolder (X = 1....)
+# Show Info
+d_pagecnt="1"
+d_curpage="$d_page/users/$d_username/wants?per_page=100&page=1"
+
+until [ "$d_curpage" = "null" ] ; do
+  if [ -n "$d_usertoken" ] ; then
+    data=$(curl --stderr /dev/null -A "$d_agent" "$d_curpage" -H "Authorization: Discogs token=$d_usertoken")
+  else
+    data=$(curl --stderr /dev/null -A "$d_agent" "$d_curpage")
+  fi
+
+  d_numpages=$(echo "$data" | jq -r '.pagination.pages')
+  echo "Load wantlist page ${d_pagecnt}/${d_numpages}"
+
+  echo "$data" > "${e_tempfolder}/wantlist_${d_pagecnt}.json"
+  ((d_pagecnt++))
+  d_curpage=$(echo "$data" | jq -r '.pagination.urls.next')
+  sleep "$d_sleeptime"
+done
+
+# clean
+unset data
+unset d_pagecnt
+unset d_curpage
+unset d_numpages
+# ------------------------------------------------------------------------------------------------------------------
+# Create TAR-GZ from all the *.json files in temp-folder
+# Save in HOME folder
+e_date=$(date +%d.%m.%Y-%H:%M:%S)
+e_file="${HOME}/Discogsexport_${d_username}_${e_date}.tar.gz"
+
+cd "$e_tempfolder"
+tar -czf "tmp.tar.gz" *.json
+mv "${e_tempfolder}/tmp.tar.gz" "$e_file"
+echo "Data stored in: $e_file"
+rm -f -r -d "$e_tempfolder"
+
+exit 0
