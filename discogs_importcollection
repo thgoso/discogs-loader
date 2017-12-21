@@ -1,0 +1,913 @@
+#!/bin/bash
+
+# Usage: discogs_importcollection
+
+# uploads your local stored collection whith you have downloaded with discogs_exportcollection
+# for upload data into your own collection you need a user-token
+
+# you must do a re-routing for folders, wantlist, custom fields
+# so you can upload local data from wantlist, folder to any other on discogs
+# custom fields can be shifted into another
+
+# Copyright (C) 2017 Thomas Gollmer, th_goso@freenet.de
+# Dieses Programm ist freie Software. Sie können es unter den Bedingungen der GNU General Public License,
+# wie von der Free Software Foundation veröffentlicht, weitergeben und/oder modifizieren,
+# entweder gemäß Version 3 der Lizenz oder (nach Ihrer Option) jeder späteren Version.
+# Die Veröffentlichung dieses Programms erfolgt in der Hoffnung, daß es Ihnen von Nutzen sein wird,
+# aber OHNE IRGENDEINE GARANTIE, sogar ohne die implizite Garantie der
+# MARKTREIFE oder der VERWENDBARKEIT FÜR EINEN BESTIMMTEN ZWECK.
+# Details finden Sie in der GNU General Public License. Sie sollten ein Exemplar der GNU General Public License
+# zusammen mit diesem Programm erhalten haben. Falls nicht, siehe <http://www.gnu.org/licenses/>.
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Low level upload functions
+# add release to discogs folder
+# write custom fileds in release in collection
+# add release to wantlist
+#
+# ----------------------------------------------------------------------------------------------------------------------
+# param: folder-id  release-id
+# return in stdout: 0 if an error occours or the instance-id for the new added release
+function add_release_to_folder () {
+  # if ratelimit goes down, wait a minute
+  if [ "$g_ratelimit" -lt 5 ] ; then
+    echo -e -n "\033[2K\rDiscogs upload limit reached, I will wait a minute..."
+    sleep 60
+  fi
+
+  # try to upload data... if 3 times an error occours, print error-message and end
+  local upl_cnt=3
+  while ((upl_cnt>0)); do
+    # Send POST with jsondata
+    # include HTTP-header in output
+    local retval=$(curl -i \
+      --stderr /dev/null \
+      -m 30 \
+      -A "$g_agent" \
+      -H "Authorization: Discogs token=$g_usertoken" \
+      -X POST "$g_page/users/$g_username/collection/folders/$1/releases/$2")      
+    # check server response ... must be 201
+    local response=$(echo "$retval" | grep "^HTTP/1.1 201")
+    # on success, get the instance-id from retval
+    if [ -n "$response" ] ; then 
+      local inst_id=$(echo "$retval" | grep "^{\"instance_id\":" | jq -r '.instance_id')
+      break
+    fi
+    ((upl_cnt--))
+    # on error wait a seconds before new upload
+    sleep 1
+  done
+
+  # get new val for g_ratelimit from HTTP header
+  g_ratelimit=$(echo "$retval" | grep -o "X-Discogs-Ratelimit-Remaining: [[:digit:]]*" | awk '{print $2}')
+
+  # check several errors, on error return 0 in stdout
+  if [ "$upl_cnt" -eq 0 ] || [ "$inst_id" = "null" ] || [ -z "$inst_id" ] || [ "$inst_id" = "0" ] ; then 
+    echo "0"
+  else
+    echo "$inst_id"
+  fi
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# param: folder-id  release-id  instance-id  field-id  json-text
+# return in stdout "SUCCESS" or "ERROR"
+function write_one_custom () {
+  # if ratelimit goes down, wait a minute
+  if [ "$g_ratelimit" -lt 5 ] ; then
+    echo -e -n "\033[2K\rDiscogs upload limit reached, I will wait a minute..."
+    sleep 60
+  fi
+
+  # try to upload data... if 3 times an error occours, print error-message and end
+  local upl_cnt=3
+  while ((upl_cnt>0)); do
+    # Send POST with jsondata
+    # include HTTP-header in output
+    local retval=$(curl -i \
+      --stderr /dev/null \
+      -m 30 \
+      -A "$g_agent" \
+      -H "Authorization: Discogs token=$g_usertoken" \
+      -H "Content-Type: application/json" \
+      -X POST -d "{\"value\": $5}" \
+      "$g_page/users/$g_username/collection/folders/$1/releases/$2/instances/$3/fields/$4")
+    # check server response ... must be 204
+    local response=$(echo "$retval" | grep "^HTTP/1.1 204")
+    # end if was 204
+    if [ -n "$response" ] ; then break ; fi
+    ((upl_cnt--))
+    # on error wait a seconds before new upload
+    sleep 1
+  done
+  
+  # get new val for g_ratelimit from HTTP header
+  g_ratelimit=$(echo "$retval" | grep -o "X-Discogs-Ratelimit-Remaining: [[:digit:]]*" | awk '{print $2}')
+
+  # 3 times error received, show error message
+  if [ "$upl_cnt" -eq 0 ] ; then
+    echo "ERROR"
+  else
+    echo "SUCCESS"
+  fi
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# param: release-id
+# return on stdout "SUCCESS" or "ERROR"
+function add_release_to_wantlist () {
+  # if ratelimit goes down, wait a minute
+  if [ "$g_ratelimit" -lt 5 ] ; then
+    echo -e -n "\033[2K\rDiscogs upload limit reached, I will wait a minute..."
+    sleep 60
+  fi
+
+  # try to upload data... if 3 times an error occours, print error-message and end
+  local upl_cnt=3
+  while ((upl_cnt>0)); do
+    # Send POST with jsondata
+    # include HTTP-header in output
+    local retval=$(curl -i \
+      --stderr /dev/null \
+      -m 30 \
+      -A "$g_agent" \
+      -H "Authorization: Discogs token=$g_usertoken" \
+      -X PUT "$g_page/users/$g_username/wants/$1")
+    # check server response ... must be 201
+    local response=$(echo "$retval" | grep "^HTTP/1.1 201")
+    # end if was 201
+    if [ -n "$response" ] ; then break ; fi
+    ((upl_cnt--))
+    # on error wait a seconds before new upload
+    sleep 1
+  done
+
+  # get new val for g_ratelimit from HTTP header
+  g_ratelimit=$(echo "$retval" | grep -o "X-Discogs-Ratelimit-Remaining: [[:digit:]]*" | awk '{print $2}')
+
+  # 3 times error received, print error message
+  if [ "$upl_cnt" -eq 0 ] ; then
+    echo "ERROR"
+  else
+    echo "SUCCESS"
+  fi
+}
+# ----------------------------------------------------------------------------------------------------------------------
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+# ----------------------------------------------------------------------------------------------------------------------
+# Functions to construct data for upload from local data
+# ----------------------------------------------------------------------------------------------------------------------
+# param: folder-id release-id instance-id release-data     < release-data must be in json-format
+function write_custom_fields () {
+  local fid_pair=""
+  local src_fid=""
+  local dest_fid=""
+  local src_textjson=""
+  local dest_textjson=""
+  local write_ret=""
+
+  local src_table[0]=""
+  local dest_table[0]=""
+  local len_table=0
+  local len_arr=0
+  local loop_cnt=0
+  local str_cnt=0
+
+  local old_IFS="$IFS"
+  IFS=$'\n'
+
+  # loop over all textfield-routing-items
+  for fid_pair in "${g_textfieldrouting[@]}" ; do
+    src_fid=$(echo "$fid_pair" | awk -F " " '{print $1}')
+    dest_fid=$(echo "$fid_pair" | awk -F " " '{print $2}')
+    # read from param release-data and extract when field-id == src_fid
+    # write output on discogs to textfield with id = dest_id
+    # ignore empty values
+    dest_textjson=$(echo "$4" | jq '.notes[] | .field_id, .value' | grep "^$src_fid" -A1 | tail -n 1)
+    if ! [ "$dest_textjson" = '""' ] && [ -n "$dest_textjson" ] ; then
+      write_ret=$(write_one_custom "$1" "$2" "$3" "$dest_fid" "$dest_textjson")
+      if [ "$write_ret" = "ERROR" ] ; then
+          echo ""
+          echo "ERROR: Writing custom field: $dest_fid release: $2 !"
+        fi
+    fi
+  done
+
+  # loop over all dropfield-routing-items
+  len_arr=${#g_dropfieldrouting[@]}
+  for ((loop_cnt=0; loop_cnt<len_arr; loop_cnt++)) ; do
+    src_fid=$(echo "${g_dropfieldrouting[$loop_cnt]}" | awk -F " " '{print $1}')
+    dest_fid=$(echo "${g_dropfieldrouting[$loop_cnt]}" | awk -F " " '{print $2}')
+    # split replacement strings in two arrays
+    src_table=($(echo "${g_dropitemrouting[$loop_cnt]}" | awk -F "\t" '{for(i=1; i<=NF; i+=2) print $i}'))
+    dest_table=($(echo "${g_dropitemrouting[$loop_cnt]}" | awk -F "\t" '{for(i=2; i<=NF; i+=2) print $i}'))
+    len_table=$(echo "${g_dropitemrouting[$loop_cnt]}" | awk -F "\t" '{print NF / 2}')
+    # find text replacement
+    src_textjson=$(echo "$4" | jq '.notes[] | .field_id, .value' | grep "^$src_fid" -A1 | tail -n 1)
+    for ((str_cnt=0; str_cnt<len_table; str_cnt++)) ; do
+      if [ "$src_textjson" = "${src_table[$str_cnt]}" ] ; then
+        dest_textjson=${dest_table[$str_cnt]}
+        write_ret=$(write_one_custom "$1" "$2" "$3" "$dest_fid" "$dest_textjson")
+        if [ "$write_ret" = "ERROR" ] ; then
+          echo ""
+          echo "ERROR: Writing custom field: $dest_fid release: $2 !"
+        fi
+        break
+      fi
+    done
+  done
+  IFS="$old_IFS"
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# uploads one release to a folder on discogs
+# param: cur_upload_number folder-id release-data          < release-data must be in json-format
+function upload_release_to_folder () {
+  # get release-id from json-data
+  local cur_release_id=$(echo "$3" | jq -r '.id')
+  # print all status messages in one and only line
+  echo -e -n "\033[2K\r${1}/${g_num_to_upload} add release-id: $cur_release_id to folder-id: $2"
+  # add release <- returns "0" if release with this release-id does not exists or the instance_id (number) on success
+  local cur_instance_id=$(add_release_to_folder "$2" "$cur_release_id")
+  # Do not write custom fields on error adding release
+  if [ "$cur_instance_id" = "0" ] ; then
+    echo ""
+    echo "ERROR: Release $cur_release_id does not exists anymore on discogs !"
+    echo "$3" | jq -r '.basic_information.title'
+    echo "$3" | jq -r '.basic_information.artists[].name'
+  else
+    echo -e -n "\033[2K\r${1}/${g_num_to_upload} write custom fields for release-id: $cur_release_id"
+    write_custom_fields "$2" "$cur_release_id" "$cur_instance_id" "$3"
+  fi
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# uploads one release to wantlist on discogs
+# param: cur_upload_number release-data                    < release-data must be in json-format
+function upload_release_to_wantlist () {
+  # get release-id from json-data
+  local cur_release_id=$(echo "$2" | jq -r '.id')
+  # print all status messages in one and only line
+  echo -e -n "\033[2K\r${1}/${g_num_to_upload} add release-id: $cur_release_id to wantlist"
+  # add release <- returns "SUCCESS" or "ERROR"
+  local cur_status=$(add_release_to_wantlist "$cur_release_id")
+  if [ "$cur_status" = "ERROR" ] ; then
+    echo ""
+    echo "ERROR: Release $cur_release_id does not exists anymore on discogs !"
+    echo "$3" | jq -r '.basic_information.title'
+    echo "$3" | jq -r '.basic_information.artists[].name'
+  fi
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# upload mainloop
+# gets every release to upload and save data in json-format
+# calls one of the sub-functions "upload_release_to_wantlist" or "upload_release_to_folder"
+function do_upload {
+  local cur_folder_id_pair=""
+  local cur_folder_id_src=""
+  local cur_folder_id_dest=""
+  local cur_file=""
+  local cur_releases_in_page=""
+  local cur_release_data=""
+  local cur_release_index=0
+  local cur_upload_cnt=0
+
+  echo "----------------------------------------------------------------"
+  echo "Now let's start upload"
+  echo "If you are logged in discogs via browser LOG OUT now !!!"
+  echo "Do NOT change any data on your account while uploading !!!"
+  echo "Do NOT use discogs-homepage or server in any other form !!!"
+  echo "Accessing discogs is rate-limited. If you use discogs while"
+  echo "uploading data, upload-rate will go down."
+  echo "Press <ENTER> when ready !"
+  read # wait for enter
+  echo ""
+
+  # loop over all folders to upload
+  for cur_folder_id_pair in "${g_folderrouting[@]}" ; do
+    cur_folder_id_src=$(echo "$cur_folder_id_pair" | awk -F " " '{print $1}')
+    cur_folder_id_dest=$(echo "$cur_folder_id_pair" | awk -F " " '{print $2}')
+
+    # transfer = wantlist to wantlist
+    if [ "$cur_folder_id_src" == "w" ] && [ "$cur_folder_id_dest" == "w" ] ; then
+      # loop over all wantlist-pagefiles
+      for cur_file in $g_tempfolder/wantlist_*.json ; do
+        # get number of releases in page
+        cur_releases_in_page=$(cat "$cur_file" | jq -r '.wants | length')
+        # loop over all releases in page
+        for ((cur_release_index=0; cur_release_index<cur_releases_in_page; cur_release_index++)) ; do
+          cur_release_data=$(cat "$cur_file" | jq ".wants[$cur_release_index]")
+          ((cur_upload_cnt++))
+          upload_release_to_wantlist "$cur_upload_cnt" "$cur_release_data" 
+        done
+      done
+
+    # transfer = wantlist to folder
+    elif [ "$cur_folder_id_src" == "w" ] && [ "$cur_folder_id_dest" != "w" ] ; then
+      # loop over all wantlist-pagefiles
+      for cur_file in $g_tempfolder/wantlist_*.json ; do
+        # get number of releases in page
+        cur_releases_in_page=$(cat "$cur_file" | jq -r '.wants | length')
+        # loop over all releases in page
+        for ((cur_release_index=0; cur_release_index<cur_releases_in_page; cur_release_index++)) ; do
+          cur_release_data=$(cat "$cur_file" | jq ".wants[$cur_release_index]")
+          ((cur_upload_cnt++))
+          upload_release_to_folder "$cur_upload_cnt" "$cur_folder_id_dest" "$cur_release_data" 
+        done
+      done
+
+    # transfer = folder to wantllist
+    elif [ "$cur_folder_id_src" != "w" ] && [ "$cur_folder_id_dest" == "w" ] ; then
+      # loop over all folder-pagefiles
+      for cur_file in $g_tempfolder/collectionfolder_${cur_folder_id_src}_page_*.json ; do
+        # get number of releases in page
+        cur_releases_in_page=$(cat "$cur_file" | jq -r '.releases | length')
+        # loop over all releases in page
+        for ((cur_release_index=0; cur_release_index<cur_releases_in_page; cur_release_index++)) ; do
+          cur_release_data=$(cat "$cur_file" | jq ".releases[$cur_release_index]")
+          ((cur_upload_cnt++))
+          upload_release_to_wantlist "$cur_upload_cnt" "$cur_release_data" 
+        done
+      done
+
+    # transfer = folder to folder
+    else
+      # loop over all folder-pagefiles
+      for cur_file in $g_tempfolder/collectionfolder_${cur_folder_id_src}_page_*.json ; do
+        # get number of releases in page
+        cur_releases_in_page=$(cat "$cur_file" | jq -r '.releases | length')
+        # loop over all releases in page
+        for ((cur_release_index=0; cur_release_index<cur_releases_in_page; cur_release_index++)) ; do
+          cur_release_data=$(cat "$cur_file" | jq ".releases[$cur_release_index]")
+          ((cur_upload_cnt++))
+          upload_release_to_folder "$cur_upload_cnt" "$cur_folder_id_dest" "$cur_release_data" 
+        done
+      done
+
+    fi
+
+  done
+  echo ""
+  echo "Done"
+}
+# ----------------------------------------------------------------------------------------------------------------------
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+# ----------------------------------------------------------------------------------------------------------------------
+#
+#
+#                                              Datarouting, Inputmenues
+#
+#
+# ----------------------------------------------------------------------------------------------------------------------
+# Let the user input the user-name and user-token for discogs-account to upload data and input-file to read from
+# Check input-file an unzip data to "g_tempfolder"
+# Connect to the discogs-api and check username/token
+# Exit on Error
+function get_input_data {
+  echo "------------------------ DISCOGS IMPORT ------------------------"
+  echo "Enter user-name and user-token from discogs-account for upload."
+  echo "Enter full path/filename of your local discogs-export-file."
+
+  local filename=""
+  read -p "user-name: " g_username
+  read -p "user-token: " g_usertoken
+  read -p "input-file full path/name: " filename
+
+  echo "Read input file..."
+  if [ -z "$g_username" ] ; then g_username="0" ; fi
+  if [ -z "$g_usertoken" ] ; then g_usertoken="0" ; fi
+
+  # make (new temp-folder)
+  rm -f -r -d "$g_tempfolder"
+  mkdir "$g_tempfolder"
+
+  # check if input is tar-gz
+  local tmp=$(file -b --mime-type "$filename" | grep "gzip")
+  if [ -z "$tmp" ] ; then
+    rm -f -r -d "$g_tempfolder"
+    echo "$filename is no Discogs-Export-File !"
+    exit 1
+  fi
+
+  # extract
+  tar -xzf "$filename" -C "$g_tempfolder" 2> /dev/null
+
+  # check if file "userdata.json" exists
+  if ! [ -e "$g_tempfolder/userdata.json" ] ; then
+    rm -f -r -d "$g_tempfolder"
+    echo "$filename is no Discogs-Export-File !"
+    exit 1
+  fi
+
+  # connect to discogs-api and check login
+  echo "Connecting to discogs..."
+  g_username=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username" \
+    -H "Authorization: Discogs token=$g_usertoken" | jq -r '.username')
+
+  if [ "$g_username" = "null" ] ; then
+    rm -f -r -d "$g_tempfolder"
+    echo "Login failed !"
+    exit 1
+  fi
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# returns in stdout all src-folders
+# one folder per line
+# line = "folder-id TAB folder-name TAB number-of-items"
+function get_src_folders {
+  # Folderdata src folder... we do not need folders with 0 items
+  local data=$(cat "$g_tempfolder/folderdata.json")
+  local num=$(echo "$data" | jq -r '.folders | length')
+  local cnt=0
+    
+  for ((cnt=0; cnt<num; cnt++)) ; do
+    local count=$(echo "$data" | jq -r ".folders[$cnt].count")
+    local name=$(echo "$data" | jq -r ".folders[$cnt].name")
+    local fid=$(echo "$data" | jq -r ".folders[$cnt].id")
+    if [ "$count" -gt 0 ] ; then
+      echo -e "${fid}\t${name}\t${count}"
+    fi
+  done
+  # Add "Wantlist" to folderlist, if the src-wantlist is not empty
+  count=$(cat "$g_tempfolder/userdata.json" | jq -r '.num_wantlist')
+  if [ "$count" = "null" ] ; then count=0 ; fi
+  if [ "$count" -gt 0 ] ; then
+    echo -e "w\tWantlist\t$count"
+  fi
+}
+# ------------------------------------------------------------------------------------------------------------------
+# returns in stdout all dest-folders
+# one folder per line
+# line = "folder-id TAB folder-name TAB number-of-items"
+function get_dest_folders {
+  # Folderdata dest folder... we do not need folder0 = ALL-folder
+  local data=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username/collection/folders" \
+    -H "Authorization: Discogs token=$g_usertoken")
+  local num=$(echo "$data" | jq -r '.folders | length')
+  local cnt=0
+    
+  for ((cnt=0; cnt<num; cnt++)) ; do
+    local count=$(echo "$data" | jq -r ".folders[$cnt].count")
+    local name=$(echo "$data" | jq -r ".folders[$cnt].name")
+    local fid=$(echo "$data" | jq -r ".folders[$cnt].id")
+    if [ "$fid" -gt 0 ] ; then
+      echo -e "${fid}\t${name}\t${count}"
+    fi
+  done
+  # Add "Wantlist" to folderlist
+  count=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username" \
+    -H "Authorization: Discogs token=$g_usertoken" | jq -r '.num_wantlist')
+  if [ "$count" = "null" ] ; then count=0 ; fi
+  echo -e "w\tWantlist\t$count"
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# returns in stdout all src-textfields
+# one field per line
+# line = "field-id TAB field-name TAB field-lines"
+function get_src_textfields {
+  local data=$(cat "$g_tempfolder/fieldsdata.json")
+  local num=$(echo "$data" | jq -r '.fields | length')
+  local cnt=0
+    
+  for ((cnt=0; cnt<num; cnt++)) ; do
+    local name=$(echo "$data" | jq -r ".fields[$cnt].name")
+    local fid=$(echo "$data" | jq -r ".fields[$cnt].id")
+    local ftype=$(echo "$data" | jq -r ".fields[$cnt].type")
+    if [ "$ftype" = "textarea" ] ; then
+      local flines=$(echo "$data" | jq -r ".fields[$cnt].lines")
+      echo -e "${fid}\t${name}\t${flines}"
+    fi
+  done
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# returns in stdout all dest-textfields
+# one field per line
+# line = "field-id TAB field-name TAB field-lines"
+function get_dest_textfields {
+  local data=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username/collection/fields" \
+    -H "Authorization: Discogs token=$g_usertoken")
+  local num=$(echo "$data" | jq -r '.fields | length')
+  local cnt=0
+    
+  for ((cnt=0; cnt<num; cnt++)) ; do
+    local name=$(echo "$data" | jq -r ".fields[$cnt].name")
+    local fid=$(echo "$data" | jq -r ".fields[$cnt].id")
+    local ftype=$(echo "$data" | jq -r ".fields[$cnt].type")
+    if [ "$ftype" = "textarea" ] ; then
+      local flines=$(echo "$data" | jq -r ".fields[$cnt].lines")
+      echo -e "${fid}\t${name}\t${flines}"
+    fi
+  done
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# returns in stdout all src-dropdownfields
+# one field per line
+# line = "field-name TAB field-id TAB value1 TAB value2 ..."
+function get_src_dropfields {
+  local data=$(cat "$g_tempfolder/fieldsdata.json")
+  local num=$(echo "$data" | jq -r '.fields | length')
+  local cnt=0
+    
+  for ((cnt=0; cnt<num; cnt++)) ; do
+    local name=$(echo "$data" | jq -r ".fields[$cnt].name")
+    local fid=$(echo "$data" | jq -r ".fields[$cnt].id")
+    local ftype=$(echo "$data" | jq -r ".fields[$cnt].type")
+    if [ "$ftype" = "dropdown" ] ; then
+      local fitems=$(echo "$data" | jq -r ".fields[$cnt].options | length")
+      echo -e "${fid}\t${name}\t${fitems}"
+    fi
+  done
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# returns in stdout all dest-dropdownfields
+# one field per line
+# line = "field-name TAB field-id TAB value1 TAB value2 ..."
+function get_dest_dropfields {
+  local data=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username/collection/fields" \
+    -H "Authorization: Discogs token=$g_usertoken")
+  local num=$(echo "$data" | jq -r '.fields | length')
+  local cnt=0
+    
+  for ((cnt=0; cnt<num; cnt++)) ; do
+    local name=$(echo "$data" | jq -r ".fields[$cnt].name")
+    local fid=$(echo "$data" | jq -r ".fields[$cnt].id")
+    local ftype=$(echo "$data" | jq -r ".fields[$cnt].type")
+    if [ "$ftype" = "dropdown" ] ; then
+      local fitems=$(echo "$data" | jq -r ".fields[$cnt].options | length")
+      echo -e "${fid}\t${name}\t${fitems}"
+    fi
+  done
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# returns in stdout all dropdownfield-items from local data in tempfolder
+# Calling Param = FIELD-ID
+# Output:
+# Number of values \n
+# valuetext 1 \n
+# .
+# .
+# valuetext x
+function get_src_dropitems () {
+  local data=$(cat "$g_tempfolder/fieldsdata.json")
+  local num_fields=$(echo "$data" | jq -r '.fields | length')
+  local idlist=($(echo "$data" | jq -r ".fields[].id"))
+  local cnt=0
+
+  # store field-index-number for field from calling param $1 in cnt
+  for ((cnt=0; cnt<num_fields; cnt++)) ; do
+    if [ "$1" = "${idlist[$cnt]}" ] ; then break ; fi
+  done
+
+  # print number of items and items per line
+  echo "$data" | jq -r ".fields[$cnt].options | length"
+  echo "$data" | jq ".fields[$cnt].options[]"  
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# returns in stdout all dropdownfield-items from discogs data
+# Calling Param = FIELD-ID
+# Output:
+# Number of values \n
+# valuetext 1 \n
+# .
+# .
+# valuetext x
+function get_dest_dropitems () {
+  local data=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username/collection/fields" \
+    -H "Authorization: Discogs token=$g_usertoken")
+  local num_fields=$(echo "$data" | jq -r '.fields | length')
+  local idlist=($(echo "$data" | jq -r ".fields[].id"))
+  local cnt=0
+
+  # store field-index-number for field from calling param $1 in cnt
+  for ((cnt=0; cnt<num_fields; cnt++)) ; do
+    if [ "$1" = "${idlist[$cnt]}" ] ; then break ; fi
+  done
+
+  # print number of items and items per line
+  echo "$data" | jq -r ".fields[$cnt].options | length"
+  echo "$data" | jq ".fields[$cnt].options[]"  
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# Print all folder infos, let the user make folder routing
+# Returns a routing table in global array "g_folderrouting[]"
+# in every array field the data is "local-folder-id SPACE discogs-folder-id"
+# Return in global var "g_num_to_upload" to number of releases to upload
+function route_folders {
+  echo "Read folders..."
+  # read src & dest folderstructures
+  local src_folders=$(get_src_folders)
+  local dest_folders=$(get_dest_folders)
+  # make arrays of ids
+  local src_ids=($(echo "$src_folders" | awk -F "\t" '{print $1}'))
+  local dest_ids=($(echo "$dest_folders" | awk -F "\t" '{print $1}'))
+  # formated textoutput
+  echo -e "\033[7mFolders/Wantlist in local data: ID name items                   \033[0m"
+  echo "$src_folders" | awk -F "\t" '{printf ("%-10s %-42s %10s\n", $1, $2, $3)}'
+  echo -e "\033[7mFolders/Wantlist in discogs: ID name items                      \033[0m"
+  echo "$dest_folders" | awk -F "\t" '{printf ("%-10s %-42s %10s\n", $1, $2, $3)}'
+  echo "----------------------------------------------------------------"
+  echo "Type ID-local-folder <SPACE> ID-discogs-folder"
+  echo "For example: <0 1> and press <ENTER>"
+  echo "To upload local data from folder with id 0"
+  echo "To discogs folder with ID 1"
+  echo "When routing done, press <ENTER> on blank line."
+  local inval=""
+  local refval=""
+  # let the user make input, check if folder-id exists
+  while ((1)) ; do
+    read -p "SRC-ID DEST-ID: " inval
+    if [ -z "$inval" ] ; then break ; fi
+    local inval1=$(echo "$inval" | awk '{print $1}')
+    local inval2=$(echo "$inval" | awk '{print $2}')
+    local status=0
+    for refval in "${src_ids[@]}" ; do
+      if [ "$refval" = "$inval1" ] ; then ((status++)) ; fi
+    done
+    for refval in "${dest_ids[@]}" ; do
+      if [ "$refval" = "$inval2" ] ; then ((status++)) ; fi
+    done
+    if [ "$status" -eq 2 ] ; then
+      g_folderrouting+=("$inval")
+      local oldval=$g_num_to_upload
+      local newval=$(echo "$src_folders" | grep "^$inval1" | awk -F "\t" '{print $3}')
+      ((g_num_to_upload=oldval+newval))
+
+    else
+      echo "Unknown ID !"
+    fi
+  done  
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# Print all textfield infos, let the user make textfield routing
+# Returns a routing table in global array "g_textfieldrouting[]"
+# in every array field the data is "local-textfield-id SPACE discogs-textfield-id"
+function route_textfields {
+  echo "Read textfields..."
+  # read textfields
+  local src_textfields=$(get_src_textfields)
+  local dest_textfields=$(get_dest_textfields)
+  # make arrays of ids
+  local src_ids=($(echo "$src_textfields" | awk -F "\t" '{print $1}'))
+  local dest_ids=($(echo "$dest_textfields" | awk -F "\t" '{print $1}'))
+  # formated textoutput
+  echo -e "\033[7mTextfields in local data: ID name lines                         \033[0m"
+  echo "$src_textfields" | awk -F "\t" '{printf ("%-10s %-42s %10s\n", $1, $2, $3)}'
+  echo -e "\033[7mTextfields in discogs: ID name lines                            \033[0m"
+  echo "$dest_textfields" | awk -F "\t" '{printf ("%-10s %-42s %10s\n", $1, $2, $3)}'
+  echo "----------------------------------------------------------------"
+  echo "Type ID-local-textfield <SPACE> ID-discogs-textfield"
+  echo "For example: <1 2> and press <ENTER>"
+  echo "To upload local data from textfield with id 1"
+  echo "To discogs textfield with ID 2"
+  echo "When routing done, press <ENTER> on blank line."
+  local inval=""
+  local refval=""
+  # let the user make input, check if textfields-id exists
+  while ((1)) ; do
+    read -p "SRC-ID DEST-ID: " inval
+    if [ -z "$inval" ] ; then break ; fi
+    local inval1=$(echo "$inval" | awk '{print $1}')
+    local inval2=$(echo "$inval" | awk '{print $2}')
+    status=0
+    for refval in "${src_ids[@]}" ; do
+      if [ "$refval" = "$inval1" ] ; then ((status++)) ; fi
+    done
+    for refval in "${dest_ids[@]}" ; do
+      if [ "$refval" = "$inval2" ] ; then ((status++)) ; fi
+    done
+    if [ "$status" -eq 2 ] ; then
+      g_textfieldrouting+=("$inval")
+    else
+      echo "Unknown ID !"
+    fi
+  done  
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# Print all dropdownfield infos, let the user make dropdownfield routing
+# Returns a routing table in global array "g_dropfieldrouting[]"
+# in every array field the data is "local-dropdownfield-id SPACE discogs-dropdownfield-id"
+function route_dropfields {
+  echo "Read dropdownfields..."
+  # read dropdownfields
+  local src_dropfields=$(get_src_dropfields)
+  local dest_dropfields=$(get_dest_dropfields)
+  # make arrays of ids
+  local src_ids=($(echo "$src_dropfields" | awk -F "\t" '{print $1}'))
+  local dest_ids=($(echo "$dest_dropfields" | awk -F "\t" '{print $1}'))
+  # formated textoutput
+  echo -e "\033[7mDropdownfields in local data: ID name items                     \033[0m"
+  echo "$src_dropfields" | awk -F "\t" '{printf ("%-10s %-42s %10s\n", $1, $2, $3)}'
+  echo -e "\033[7mDropdownfields in discogs: ID name items                        \033[0m"
+  echo "$dest_dropfields" | awk -F "\t" '{printf ("%-10s %-42s %10s\n", $1, $2, $3)}'
+  echo "----------------------------------------------------------------"
+  echo "Type ID-local-dropdownfield <SPACE> ID-discogs-dropdownfield"
+  echo "For example: <1 2> and press <ENTER>"
+  echo "To upload local data from dropdownfield with id 1"
+  echo "To discogs dropdownfield with ID 2"
+  echo "When routing done, press <ENTER> on blank line."
+  local inval=""
+  local refval=""
+  # let the user make input, check if textfields-id exists
+  while ((1)) ; do
+    read -p "SRC-ID DEST-ID: " inval
+    if [ -z "$inval" ] ; then break ; fi
+    local inval1=$(echo "$inval" | awk '{print $1}')
+    local inval2=$(echo "$inval" | awk '{print $2}')
+    status=0
+    for refval in "${src_ids[@]}" ; do
+      if [ "$refval" = "$inval1" ] ; then ((status++)) ; fi
+    done
+    for refval in "${dest_ids[@]}" ; do
+      if [ "$refval" = "$inval2" ] ; then ((status++)) ; fi
+    done
+    if [ "$status" -eq 2 ] ; then
+      g_dropfieldrouting+=("$inval")
+    else
+      echo "Unknown ID !"
+    fi
+  done  
+}
+# ----------------------------------------------------------------------------------------------------------------------
+# let the user route dropdown-item from selectet dropdownfields
+# data is returned in "g_dropitemrouting[]" - g_dropitemrouting[0] belongs to g_dropfieldrouting[0]
+#                                             g_dropitemrouting[1] belongs to g_dropfieldrouting[1]
+#
+# g_dropitemrouting[] formatet per index:  FS= TAB
+# "TEXTVAL1"     "TEXTVALA"     "Textval5"     "TextvalZ"      .....
+# "AAA"     "BBB"   ....
+# .
+# .
+# its a simple text replacement table >> 
+# if in src dropdownvalue="TEXTVAL1" then set discogs value to "TEXTVALA", Txtval5 upload TextvalZ
+# Textelements are stored in JSON-Format... just upload as they are
+function route_dropitems {
+  echo "----------------------------------------------------------------"
+  echo "Now please route your field-items for every dropdown-menu."
+  echo "Type <1 3> <ENTER> to set dropdown-text to text with number 3 on"
+  echo "Discogs, when dropdown-text in local data whith number 1 is set"
+  echo "When routing done, press <ENTER> on blank line."
+ 
+  local inval=""
+  local cnt=0
+  local old_IFS="$IFS"
+  
+  # loop over all combinations from dropdown-field-routings
+  local routcombi=""
+  for routcombi in "${g_dropfieldrouting[@]}" ; do
+    # get routing combi dropdown-field - dropdown-field
+    IFS=$'\n' 
+    local src_id=$(echo "$routcombi" | awk -F " " '{print $1}')
+    local dest_id=$(echo "$routcombi" | awk -F " " '{print $2}')
+    # get values from src & dest dropdown items/texts
+    # values are stored from array[index=1]
+    unset local src_items
+    unset local dest_items
+    src_items=($(get_src_dropitems "$src_id"))
+    dest_items=($(get_dest_dropitems "$dest_id"))
+    # store number of items in src & dest dropdown-items
+    # is saved in array[index=0]
+    local num_src_items=$(echo "${src_items[0]}")
+    local num_dest_items=$(echo "${dest_items[0]}")
+    # print head
+    echo -e "\033[7mID  Text local dropdown         ID  Text discogs dropdown       \033[0m"
+    # and dropdowntexts from local ---> discogs as table
+    if [ "$num_src_items" -eq "$num_dest_items" ] ; then
+      for ((cnt=1; cnt<=num_src_items; cnt++)) ; do
+        printf "%-3s %-27s %-3s %-27s\n" "$cnt" "${src_items[$cnt]}" "$cnt" "${dest_items[$cnt]}"
+      done
+    elif [ "$num_src_items" -lt "$num_dest_items" ] ; then
+      for ((cnt=1; cnt<=num_src_items; cnt++)) ; do
+        printf "%-3s %-27s %-3s %-27s\n" "$cnt" "${src_items[$cnt]}" "$cnt" "${dest_items[$cnt]}"
+      done
+      for ((; cnt<=num_dest_items; cnt++)) ; do
+        printf "                                %-3s %-27s\n" "$cnt" "${dest_items[$cnt]}"
+      done
+    else
+      for ((cnt=1; cnt<=num_dest_items; cnt++)) ; do
+        printf "%-3s %-27s %-3s %-27s\n" "$cnt" "${src_items[$cnt]}" "$cnt" "${dest_items[$cnt]}"
+      done
+      for ((; cnt<=num_src_items; cnt++)) ; do
+        printf "%-3s %-27s\n" "$cnt" "${src_items[$cnt]}"
+      done
+    fi
+    # let the user make routing
+    local valuecollection=""
+    unset valuecollection
+    while ((1)) ; do
+      read -p "SRC-ID DEST-ID: " inval
+      # break on <ENTER> but only if values for this dropfield are not empty
+      if [ -z "$inval" ] ; then 
+        if [ -n "$valuecollection" ] ; then break ; fi
+      fi
+      local val_src=$(echo "$inval" | awk '{print $1}')
+      local val_dest=$(echo "$inval" | awk '{print $2}')
+      # error check... items 1...num_src_items / num_dest_items are possible
+      if ! [[ "$val_src" = *[[:digit:]]* ]] ; then val_src=0 ; fi
+      if ! [[ "$val_dest" = *[[:digit:]]* ]] ; then val_dest=0 ; fi
+      if [ "$val_src" -lt 1 ] || [ "$val_src" -gt "$num_src_items" ] \
+        || [ "$val_dest" -lt 1 ] || [ "$val_dest" -gt "$num_dest_items" ] ; then
+        if [ -z "$inval" ] ; then 
+          echo "Empty routing table !"
+        else
+          echo "Unknown ID !"
+        fi
+      else
+        valuecollection+=("${src_items[val_src]}")
+        valuecollection+=("${dest_items[val_dest]}")
+      fi
+    done
+    IFS=$'\t'
+    g_dropitemrouting+=("${valuecollection[*]}")
+  done
+  IFS="$old_IFS"
+}
+# ----------------------------------------------------------------------------------------------------------------------
+#
+#
+#                                                         Main
+#
+#
+# ----------------------------------------------------------------------------------------------------------------------
+# Global Consts
+g_agent="github.com/thgoso/discogs-loader/"
+g_page="https://api.discogs.com"
+g_tempfolder="/tmp/discogsimport"
+# Global Var will be updated in low-level-upload-functions
+# discogs server tells you how many uploads you can do in one minute
+g_ratelimit=10
+
+# let the user input user-name, token, local file,
+# check data, function exits programm on error
+# set "g_username", "g_usertoken" and unzip data in "g_tempfolder"
+get_input_data
+
+# read all folder-infos and let the user do folder-routing
+# set "g_num_to_upload" to number of releasses to upload
+# set "g_folderrouting[]"
+# g_folderrouting[0] == "0 1"     --> upload data from local folder with id 0 to discogs folder with id 1
+# g_folderrouting[1] == "123 321" --> uploca data from local folder with id 123 to discogs folder with id 321
+# g_folderrouting[2] == "w 1"     --> upload data from local wantlist to folder with id 1
+# .
+# .
+route_folders
+if [ -z "${g_folderrouting[0]}" ] ; then
+  echo "End... no folder selected !"
+  rm -f -r -d "$g_tempfolder"
+  exit 1
+fi
+
+# read all textfield-infos and let the user do textfield-routing
+# set "g_textfieldrouting[]"
+# g_textfieldrouting[0] = "123 456" --> upload textstrings from local textfield 123 to discogs textfield 456 
+# g_textfieldrouting[1] = "789 456" --> upload textstrings from local textfield 789 also to discogs textfield 456 
+# .
+# .
+route_textfields
+
+# read all dropdownfield-infos and let the user do dropdownfield-routing
+# set "g_dropfieldrouting[]"
+# let the user do routing for dropdown-items of selectet dropfields
+# set "g_dropitemrouting[]"
+route_dropfields
+if [ -n "${g_dropfieldrouting[0]}" ] ; then route_dropitems ; fi
+# g_dropfieldrouting[0] == "1 4" -> route local dropfild with id 1 to discogs dropfield with id 4
+# g_dropfieldrouting[1] == "2 5" -> route local dropfild with id 2 to discogs dropfield with id 5
+# .
+# .
+
+# g_dropitemrouting[0] == '"TEXT1" TAB "TEXTA" TAB "TEXT2" TAB "TEXTB" ... '
+# g_dropitemrouting[1] == '"Near Mint" TAB "Grade 1" TAB "Mint" TAB "Grade 2" ... ' 
+# .
+# .
+
+# ^^^^^^^^^^ means:
+# if in local data dropfield-1 is set to "TEXT1" set discogs dropfield-4 to "TEXTA"
+# if in local data dropfield-1 is set to "TEXT2" set discogs dropfield-4 to "TEXTB"
+
+# if in local data dropfield-2 is set to "Near Mint" set discogs dropfield-5 to "Grade 1"
+# if in local data dropfield-2 is set to "Mint" set discogs dropfield-5 to "Grade 2"
+
+
+# upload all selected releases
+do_upload
+
+# clean
+rm -f -r -d "$g_tempfolder"
+exit 0
+
+
