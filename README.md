@@ -39,10 +39,10 @@ If you have downloaded your or any other collection with discogs_exportcollectio
 - local wantlist to any discogs collection folder
 - local collection folder to any collection folder on discogs
 - local collection folder to discogs wantlist
-- the content of any local textfield to any discogs textfields
+- the content of any local textfield to any discogs textfield
 - the content of any local dropdown item to any discogs dropdown item
 
-Let's have a look to the console output, so you can understand what is possible.
+Let's have a look at the console output, so you can understand what is possible:
 ```
 ------------------------ DISCOGS IMPORT ------------------------
 Enter user-name and user-token from discogs-account for upload.
