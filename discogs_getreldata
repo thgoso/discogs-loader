@@ -37,66 +37,56 @@
 # PICURLS      url1         url2          ...
 
 
-# Agent for curl
-d_agent="github.com/thgoso/discogs-loader/"
-# Discogs-Page
-d_relpage="https://api.discogs.com/releases"
-
 
 # ------------------------------------------------------------------------------------------------------------------
-# save json-data for release in "$reldata"
+# save json-data for release in "$g_reldata"
 # Param: Discogs-Release-Number [Optional Discogs-Token]
 function get_reldata ()
 {
   if [ -n "$2" ] ; then
-    reldata=$(curl --stderr /dev/null -A "$d_agent" "$d_relpage/$1" -H "Authorization: Discogs token=$2")
+    g_reldata=$(curl --stderr /dev/null -A "$g_agent" "$g_relpage/$1" -H "Authorization: Discogs token=$2")
   else
-    reldata=$(curl --stderr /dev/null -A "$d_agent" "$d_relpage/$1")
+    g_reldata=$(curl --stderr /dev/null -A "$g_agent" "$g_relpage/$1")
   fi
-  retval="$?"
+  local retval="$?"
 
   if [ "$retval" != "0" ] ; then
     echo "Error while downloading !" >&2
     echo "\"curl\" retruns: $retval" >&2
-    IFS="$old_IFS"
     exit 1
   fi
 
-  if [ "$reldata" = '{"message": "Release not found."}' ]; then
-    echo "Can't find release $relnr !" >&2
-    IFS="$old_IFS"
+  if [ "$g_reldata" = '{"message": "Release not found."}' ]; then
+    echo "Can't find release $1 !" >&2
     exit 1
   fi
 }
 # ------------------------------------------------------------------------------------------------------------------
-# show Mainartists and save in "$mainartists[]"
+# show Mainartists and save in "$g_mainartists[]"
 function show_mainartists
 {
   IFS=$'\n'
-  mainartists=($(echo "$reldata" | jq -r '.artists[].name'))
-  IFS="$sep"
-  echo -e "MAINARTISTS$sep${mainartists[*]}"
+  g_mainartists=($(echo "$g_reldata" | jq -r '.artists[].name'))
+  IFS="$g_sep"
+  echo -e "MAINARTISTS$g_sep${g_mainartists[*]}"
 }
 # ------------------------------------------------------------------------------------------------------------------
 # show title
 function show_title
 {
-  unset tmp
-  tmp=$(echo "$reldata" | jq -r '.title')
-  echo -e "TITLE$sep$tmp"
+  local tmp=$(echo "$g_reldata" | jq -r '.title')
+  echo -e "TITLE$g_sep$tmp"
 }
 # ------------------------------------------------------------------------------------------------------------------
 # show labels
 function show_labels
 {
-  unset tmp
-  tmp=$(echo "$reldata" | jq -r '.labels[0].name')
+  local tmp=$(echo "$g_reldata" | jq -r '.labels[0].name')
   if ! [ "$tmp" == "null" ] ; then
     IFS=$'\n'
-    unset tmp
-    tmp=($(echo "$reldata" | jq -r '.labels[].name'))
-    IFS="$sep"
-    echo -e "LABELS$sep${tmp[*]}"
+    local names=($(echo "$g_reldata" | jq -r '.labels[].name'))
+    IFS="$g_sep"
+    echo -e "LABELS$g_sep${names[*]}"
   fi
 }
 # ------------------------------------------------------------------------------------------------------------------
@@ -104,74 +94,64 @@ function show_labels
 function show_formats
 {
   IFS=$'\n'
-  unset tmp
-  tmp=($(echo "$reldata" | jq -r '.formats[].name'))
-  unset tmp2
-  tmp2=$(echo "$reldata" | jq -r '.formats[].descriptions[0]')
+  local tmp=($(echo "$g_reldata" | jq -r '.formats[].name'))
+  local tmp2=$(echo "$g_reldata" | jq -r '.formats[].descriptions[0]')
+
   if ! [ "$tmp2" == "null" ] ; then
-    unset tmp2
-    tmp2=($(echo "$reldata" | jq -r '.formats[].descriptions[]'))
+    tmp2=($(echo "$g_reldata" | jq -r '.formats[].descriptions[]'))
   fi
-  IFS="$sep"
+  IFS="$g_sep"
   if [ -n "${tmp2[0]}" ] ; then
-    echo -e "FORMATS${sep}${tmp[*]}${sep}${tmp2[*]}"
+    echo -e "FORMATS${g_sep}${tmp[*]}${g_sep}${tmp2[*]}"
   else
-    echo -e "FORMATS${sep}${tmp[*]}"
+    echo -e "FORMATS${g_sep}${tmp[*]}"
   fi
 }
 # ------------------------------------------------------------------------------------------------------------------
 # show release year
 function show_year
 {
-  unset tmp
-  tmp=$(echo "$reldata" | jq -r '.released')
+  local tmp=$(echo "$g_reldata" | jq -r '.released')
   if ! [ "$tmp" == "null" ] ; then
-    unset tmp
-    tmp=$(echo "$reldata" | jq -r '.released' | awk '{print substr($0, 1, 4)}')
-    echo -e "YEAR$sep$tmp"
+    tmp=$(echo "$g_reldata" | jq -r '.released' | awk '{print substr($0, 1, 4)}')
+    echo -e "YEAR$g_sep$tmp"
   fi
 }
 # ------------------------------------------------------------------------------------------------------------------
 # show genres
 function show_genres
 {
-  unset tmp
-  tmp=$(echo "$reldata" | jq -r '.genres[0]')
+  local tmp=$(echo "$g_reldata" | jq -r '.genres[0]')
   if ! [ "$tmp" == "null" ] ; then
     IFS=$'\n'
-    unset tmp
-    tmp=($(echo "$reldata" | jq -r '.genres[]'))
-    IFS="$sep"
-    echo -e "GENRES$sep${tmp[*]}"
+    tmp=($(echo "$g_reldata" | jq -r '.genres[]'))
+    IFS="$g_sep"
+    echo -e "GENRES$g_sep${tmp[*]}"
   fi
 }
 # ------------------------------------------------------------------------------------------------------------------
 # show styles
 function show_styles
 {
-  unset tmp
-  tmp=$(echo "$reldata" | jq -r '.styles[0]')
+  local tmp=$(echo "$g_reldata" | jq -r '.styles[0]')
   if ! [ "$tmp" == "null" ] ; then
     IFS=$'\n'
-    unset tmp
-    tmp=($(echo "$reldata" | jq -r '.styles[]'))
-    IFS="$sep"
-    echo -e "STYLES$sep${tmp[*]}"
+    tmp=($(echo "$g_reldata" | jq -r '.styles[]'))
+    IFS="$g_sep"
+    echo -e "STYLES$g_sep${tmp[*]}"
   fi
 }
 # ------------------------------------------------------------------------------------------------------------------
 # show picture url's
 function show_picurls
 {
-  unset tmp
-  tmp=$(echo "$reldata" | jq -r '.images[0].resource_url')
+  local tmp=$(echo "$g_reldata" | jq -r '.images[0].resource_url')
   if ! [ "$tmp" == "null" ] ; then
     IFS=$'\n'
-    unset tmp
-    tmp=($(echo "$reldata" | jq -r '.images[].resource_url'))
-    IFS="$sep"
+    tmp=($(echo "$g_reldata" | jq -r '.images[].resource_url'))
+    IFS="$g_sep"
     if [ -n "$tmp" ] ; then
-      echo -e "PICURLS$sep${tmp[*]}"
+      echo -e "PICURLS$g_sep${tmp[*]}"
     fi
   fi
 }
@@ -180,51 +160,58 @@ function show_picurls
 # Param: trackdata in json format
 function show_track ()
 {
-    IFS=$'\n'
-    unset line
-    # cat TRACK/HEADING and Position to "$line"
-    unset tmp
-    tmp=$(echo "$1" | jq -r ".type_")
-    # if tracktype == "track" ... get position else position = "--"
-    if [ "$tmp" == "track" ] ; then
-      line+=("TRACK")
-      line+=($(echo "$1" | jq -r ".position"))
-    else
-      line+=("HEADING")
-      line+=("--")
-    fi
-    # cat title to "$line"
-    unset tmp
-    tmp=$(echo "$1" | jq -r ".title")
-    # trim leading and trailing whitespace from title
-    line+=($(echo "$tmp" | awk '{gsub(/^ +| +$/,"")} {print $0}'))
-    # cat trackartists to "$line"
-    # if doesn't exists cat mainartist
-    unset tmp
-    tmp=$(echo "$1" | jq -r ".artists[0].name")
-    if [ "$tmp" == "null" ] ; then
-      line+=($(echo  "${mainartists[*]}"))
-    else
-      unset tmp
-      tmp=($(echo "$1" | jq -r ".artists[].name"))
-      line+=($(echo "${tmp[*]}"))
-    fi
+  local line=""
+  unset line
+  local tmp=""
 
-    IFS="$sep"
-    echo -e "${line[*]}"
+  IFS=$'\n'
+  # cat TRACK/HEADING and Position to "$line"
+  tmp=$(echo "$1" | jq -r ".type_")
+  # if tracktype == "track" ... get position else position = "--"
+  if [ "$tmp" == "track" ] ; then
+    line+=("TRACK")
+    line+=($(echo "$1" | jq -r ".position"))
+  else
+    line+=("HEADING")
+    line+=("--")
+  fi
+  # cat title to "$line"
+  tmp=$(echo "$1" | jq -r ".title")
+  # trim leading and trailing whitespace from title
+  line+=($(echo "$tmp" | awk '{gsub(/^ +| +$/,"")} {print $0}'))
+  # cat trackartists to "$line"
+  # if doesn't exists cat mainartist
+  tmp=$(echo "$1" | jq -r ".artists[0].name")
+  if [ "$tmp" == "null" ] ; then
+    line+=($(echo  "${g_mainartists[*]}"))
+  else
+    unset tmp
+    tmp=($(echo "$1" | jq -r ".artists[].name"))
+    line+=($(echo "${tmp[*]}"))
+  fi
+
+  IFS="$g_sep"
+  echo -e "${line[*]}"
 }
 # ------------------------------------------------------------------------------------------------------------------
 # show tracklist
 function show_tracklist
 {
+  local track=""
+  local subtrack=""
+  local last_track=""
+  local last_subtrack=""
+  local track_cnt=0
+  local subtrack_cnt=0
+
   # get tracklist length
-  last_track=$(echo "$reldata" | jq -r '.tracklist | length')
+  last_track=$(echo "$g_reldata" | jq -r '.tracklist | length')
   # loop over all tracks
   for ((track_cnt=0;track_cnt<last_track;track_cnt++)) ; do
-    track=$(echo "$reldata" | jq -r ".tracklist[$track_cnt]")
+    track=$(echo "$g_reldata" | jq -r ".tracklist[$track_cnt]")
     show_track "$track"
     # every track can have some subtracks...
-    last_subtrack=$(echo "$reldata" | jq -r ".tracklist[$track_cnt].sub_tracks | length")
+    last_subtrack=$(echo "$g_reldata" | jq -r ".tracklist[$track_cnt].sub_tracks | length")
     if ! [ "$last_subtrack" == "0" ] ; then
       for ((subtrack_cnt=0;subtrack_cnt<last_subtrack;subtrack_cnt++)) ; do
         subtrack=$(echo "$track" | jq -r ".sub_tracks[$subtrack_cnt]")
@@ -236,23 +223,25 @@ function show_tracklist
 # ------------------------------------------------------------------------------------------------------------------
 # Main
 
+# global Variables
+g_oldifs="$IFS"
+g_sep=$'\t'
+g_agent="github.com/thgoso/discogs-loader/"
+g_relpage="https://api.discogs.com/releases"
+g_reldata=""
+g_mainartists=""
+
 # check first commandline param rel-no
 if $(echo "$1" | grep -q '^[0-9]\+$'); then
-  relnr="$1"
-  token="$2"
+  #load data into global var "g_reldata"
+  get_reldata "$1" "$2"
 else
   echo "Usage: discogs_getreldata releasenumber [token]" >&2
   exit 1
 fi
 
-# save old IFS... set new to TAB
-old_IFS="$IFS"
-sep=$'\t'
-
-# load data
-get_reldata "$relnr" "$token"
 # show number, title and year (alsways two columns)
-echo -e "DISCOGS${sep}${relnr}"
+echo -e "DISCOGS${g_sep}${1}"
 show_title
 show_year
 # show all the data with 2 or more columns
@@ -265,7 +254,7 @@ show_tracklist
 show_picurls
 
 # restore
-IFS="$old_IFS"
+IFS="$g_oldifs"
 exit 0
 
 

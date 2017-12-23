@@ -20,180 +20,179 @@
 # Details finden Sie in der GNU General Public License. Sie sollten ein Exemplar der GNU General Public License
 # zusammen mit diesem Programm erhalten haben. Falls nicht, siehe <http://www.gnu.org/licenses/>.
 
-
-
-# Agent for curl
-d_agent="github.com/thgoso/discogs-loader/"
-# Discogs-API-Page
-d_page="https://api.discogs.com"
-# tempfolder
-e_tempfolder="/tmp/discogsexport"
 # ------------------------------------------------------------------------------------------------------------------
-# Create new tempfolder
-rm -f -r -d "$e_tempfolder"
-mkdir "$e_tempfolder"
+# Load userdata and save in file named "userdata.json" in tempfolder
+# Show Info or exit on error
+function load_userdata {
+  if [ -n "$g_usertoken" ] ; then
+    local data=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username" \
+      -H "Authorization: Discogs token=$g_usertoken")
+  else
+    local data=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username")
+  fi
+
+  g_username=$(echo "$data" | jq -r '.username')
+  local numcoll=$(echo "$data" | jq -r '.num_collection')
+
+  if [ "$g_username" = "null" ] ; then
+    echo "User does not exists !" >&2
+    rm -f -r -d "$g_tempfolder"
+    exit 1
+  fi
+
+  if [ "$numcoll" = "null" ] ; then
+    echo "Empty or private collection !" >&2
+    rm -f -r -d "$g_tempfolder"
+    exit 1
+  fi
+
+  if [ "$numcoll" = "0" ] ; then
+    echo "Empty or private collection !" >&2
+    rm -f -r -d "$g_tempfolder"
+    exit 1
+  fi
+
+  echo "$g_username has $numcoll items"
+  echo "$data" > "${g_tempfolder}/userdata.json"
+
+  sleep "$g_sleeptime"
+}
 # ------------------------------------------------------------------------------------------------------------------
-# Let the user enter user-name, user-token and save data in "$d_username" & "$d_usertoken"
+# Load folder-infos and save in file named "folderdata.json" in tempfolder
+# Show Info
+function load_folderdata {
+  if [ -n "$g_usertoken" ] ; then
+    local data=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username/collection/folders" \
+      -H "Authorization: Discogs token=$g_usertoken")
+  else
+    # in public collection we can only read folder0 = ALL-FOLDER and no other
+    local data=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username/collection/folders")
+  fi
+
+  local folders=$(echo "$data" | jq -r '.folders | length')
+  echo "in $folders folders"
+  echo "$data" > "${g_tempfolder}/folderdata.json"
+
+  sleep "$g_sleeptime"
+}
+# ------------------------------------------------------------------------------------------------------------------
+# Load fields-infos and save in file named "fieldsdata.json" in tempfolder
+# Show Info
+function load_fieldsdata {
+  if [ -n "$g_usertoken" ] ; then
+    local data=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username/collection/fields" \
+      -H "Authorization: Discogs token=$g_usertoken")
+  else
+    local data=$(curl --stderr /dev/null -A "$g_agent" "$g_page/users/$g_username/collection/fields")
+  fi
+
+  local fields=$(echo "$data" | jq -r '.fields | length')
+  echo "with $fields custom-fields"
+  echo "$data" > "${g_tempfolder}/fieldsdata.json"
+
+  sleep "$g_sleeptime"
+}
+# ------------------------------------------------------------------------------------------------------------------
+# Load collection-files and save in files named "collectionfolder_X_page_Y.json"
+# in tempfolder; X = folder-number Y = page-number
+# Show Info
+function load_collection {
+  local data=""
+  local curfolder=""
+  local pagecnt=""
+  local curpage=""
+  local numpages=""
+  local folderids=($(cat "${g_tempfolder}/folderdata.json" | jq '.folders[].id'))
+
+  for curfolder in "${folderids[@]}" ; do
+    pagecnt="1"
+    curpage="$g_page/users/$g_username/collection/folders/${curfolder}/releases?per_page=100&page=1"
+
+    until [ "$curpage" = "null" ] ; do
+      if [ -n "$g_usertoken" ] ; then
+        data=$(curl --stderr /dev/null -A "$g_agent" "$curpage" -H "Authorization: Discogs token=$g_usertoken")
+      else
+        data=$(curl --stderr /dev/null -A "$g_agent" "$curpage")
+      fi
+
+      numpages=$(echo "$data" | jq -r '.pagination.pages')
+      echo "Load collection folder ${curfolder} page ${pagecnt}/${numpages}"
+
+      echo "$data" > "${g_tempfolder}/collectionfolder_${curfolder}_page_${pagecnt}.json"
+      ((pagecnt++))
+      curpage=$(echo "$data" | jq -r '.pagination.urls.next')
+      sleep "$g_sleeptime"
+    done
+  done
+}
+# ------------------------------------------------------------------------------------------------------------------
+# Load wantlist-files and save in files named "wantlist_X.json" in tempfolder (X = 1....)
+# Show Info
+function load_wantlist {
+  local data=""
+  local numpages=""
+  local pagecnt="1"
+  local curpage="$g_page/users/$g_username/wants?per_page=100&page=1"
+
+  until [ "$curpage" = "null" ] ; do
+    if [ -n "$g_usertoken" ] ; then
+      data=$(curl --stderr /dev/null -A "$g_agent" "$curpage" -H "Authorization: Discogs token=$g_usertoken")
+    else
+      data=$(curl --stderr /dev/null -A "$g_agent" "$curpage")
+    fi
+
+    numpages=$(echo "$data" | jq -r '.pagination.pages')
+    echo "Load wantlist page ${pagecnt}/${numpages}"
+
+    echo "$data" > "${g_tempfolder}/wantlist_${pagecnt}.json"
+    ((pagecnt++))
+    curpage=$(echo "$data" | jq -r '.pagination.urls.next')
+    sleep "$g_sleeptime"
+  done
+}
+# ------------------------------------------------------------------------------------------------------------------
+# Main
+
+# global Variables
+g_agent="github.com/thgoso/discogs-loader/"
+g_page="https://api.discogs.com"
+g_tempfolder="/tmp/discogsexport"
+g_username=""
+g_usertoken=""
+g_sleeptime=0
+
+# Create tempfolder
+rm -f -r -d "$g_tempfolder"
+mkdir "$g_tempfolder"
+# Let the user enter user-name, user-token and save data in "$g_username" & "$g_usertoken"
 # set sleeptime 1 or 3 seconds
 # with usertoken you can make 60 server requests per minute, without only 25
 echo "--------------------------- DISCOGS EXPORT ----------------------------"
 echo "Enter user-name and user-token if you are the owner of the collection."
 echo "You can also read data from other users, if the collection is public."
 echo "In this case only enter the user-name and press <ENTER> for user-token."
-read -p "user-name: " d_username
-read -p "user-token: " d_usertoken
+read -p "user-name: " g_username
+read -p "user-token: " g_usertoken
 
-if [ -z "$d_usertoken" ] ; then
-  d_sleeptime="3"
+if [ -z "$g_usertoken" ] ; then
+  g_sleeptime="3"
 else
-  d_sleeptime="1"
+  g_sleeptime="1"
 fi
-# ------------------------------------------------------------------------------------------------------------------
-# Load userdata and save in file named "userdata.json" in tempfolder
-# Show Info or exit on error
-if [ -n "$d_usertoken" ] ; then
-  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username" \
-    -H "Authorization: Discogs token=$d_usertoken")
-else
-  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username")
-fi
-
-d_username=$(echo "$data" | jq -r '.username')
-d_numcollection=$(echo "$data" | jq -r '.num_collection')
-
-if [ "$d_username" = "null" ] ; then
-  echo "User does not exists !" >&2
-  rm -f -r -d "$e_tempfolder"
-  exit 1
-fi
-
-if [ "$d_numcollection" = "null" ] ; then
-  echo "Empty or private collection !" >&2
-  rm -f -r -d "$e_tempfolder"
-  exit 1
-fi
-
-if [ "$d_numcollection" = "0" ] ; then
-  echo "Empty or private collection !" >&2
-  rm -f -r -d "$e_tempfolder"
-  exit 1
-fi
-
-echo "$d_username has $d_numcollection items"
-echo "$data" > "${e_tempfolder}/userdata.json"
-
-# clean, wait
-unset data
-unset d_numcollection
-sleep "$d_sleeptime"
-# ------------------------------------------------------------------------------------------------------------------
-# Load folder-infos and save in file named "folderdata.json" in tempfolder
-# Show Info
-if [ -n "$d_usertoken" ] ; then
-  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username/collection/folders" \
-    -H "Authorization: Discogs token=$d_usertoken")
-else
-  # in public collection we can only read folder0 = ALL-FOLDER and no other
-  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username/collection/folders")
-fi
-
-d_folders=$(echo "$data" | jq -r '.folders | length')
-echo "in $d_folders folders"
-echo "$data" > "${e_tempfolder}/folderdata.json"
-
-# clean, wait
-unset del_idx
-unset data
-unset d_folders
-sleep "$d_sleeptime"
-# ------------------------------------------------------------------------------------------------------------------
-# Load fields-infos and save in file named "fieldsdata.json" in tempfolder
-# Show Info
-if [ -n "$d_usertoken" ] ; then
-  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username/collection/fields" \
-    -H "Authorization: Discogs token=$d_usertoken")
-else
-  data=$(curl --stderr /dev/null -A "$d_agent" "$d_page/users/$d_username/collection/fields")
-fi
-
-d_fields=$(echo "$data" | jq -r '.fields | length')
-echo "with $d_fields custom-fields"
-echo "$data" > "${e_tempfolder}/fieldsdata.json"
-
-# clean, wait
-unset data
-unset d_fields
-sleep "$d_sleeptime"
-# ------------------------------------------------------------------------------------------------------------------
-# Load collection-files and save in files named "collectionfolder_X_page_Y.json"
-# in tempfolder; X = folder-number Y = page-number
-# Show Info
-d_folderids=($(cat "${e_tempfolder}/folderdata.json" | jq '.folders[].id'))
-for d_curfolder in "${d_folderids[@]}" ; do
-  d_pagecnt="1"
-  d_curpage="$d_page/users/$d_username/collection/folders/${d_curfolder}/releases?per_page=100&page=1"
-
-  until [ "$d_curpage" = "null" ] ; do
-    if [ -n "$d_usertoken" ] ; then
-      data=$(curl --stderr /dev/null -A "$d_agent" "$d_curpage" -H "Authorization: Discogs token=$d_usertoken")
-    else
-      data=$(curl --stderr /dev/null -A "$d_agent" "$d_curpage")
-    fi
-
-    d_numpages=$(echo "$data" | jq -r '.pagination.pages')
-    echo "Load collection folder ${d_curfolder} page ${d_pagecnt}/${d_numpages}"
-
-    echo "$data" > "${e_tempfolder}/collectionfolder_${d_curfolder}_page_${d_pagecnt}.json"
-    ((d_pagecnt++))
-    d_curpage=$(echo "$data" | jq -r '.pagination.urls.next')
-    sleep "$d_sleeptime"
-  done
-done
-
-# clean
-unset data
-unset d_folderids
-unset d_curfolder
-unset d_pagecnt
-unset d_curpage
-unset d_numpages
-# ------------------------------------------------------------------------------------------------------------------
-# Load wantlist-files and save in files named "wantlist_X.json" in tempfolder (X = 1....)
-# Show Info
-d_pagecnt="1"
-d_curpage="$d_page/users/$d_username/wants?per_page=100&page=1"
-
-until [ "$d_curpage" = "null" ] ; do
-  if [ -n "$d_usertoken" ] ; then
-    data=$(curl --stderr /dev/null -A "$d_agent" "$d_curpage" -H "Authorization: Discogs token=$d_usertoken")
-  else
-    data=$(curl --stderr /dev/null -A "$d_agent" "$d_curpage")
-  fi
-
-  d_numpages=$(echo "$data" | jq -r '.pagination.pages')
-  echo "Load wantlist page ${d_pagecnt}/${d_numpages}"
-
-  echo "$data" > "${e_tempfolder}/wantlist_${d_pagecnt}.json"
-  ((d_pagecnt++))
-  d_curpage=$(echo "$data" | jq -r '.pagination.urls.next')
-  sleep "$d_sleeptime"
-done
-
-# clean
-unset data
-unset d_pagecnt
-unset d_curpage
-unset d_numpages
-# ------------------------------------------------------------------------------------------------------------------
+# load discogs-data save in tempfolder
+load_userdata
+load_folderdata
+load_fieldsdata
+load_collection
+load_wantlist
 # Create TAR-GZ from all the *.json files in temp-folder
 # Save in HOME folder
-e_date=$(date +%d.%m.%Y-%H:%M:%S)
-e_file="${HOME}/Discogsexport_${d_username}_${e_date}.tar.gz"
-
-cd "$e_tempfolder"
+now_date=$(date +%d.%m.%Y-%H:%M:%S)
+tar_file="${HOME}/Discogsexport_${g_username}_${now_date}.tar.gz"
+cd "$g_tempfolder"
 tar -czf "tmp.tar.gz" *.json
-mv "${e_tempfolder}/tmp.tar.gz" "$e_file"
-echo "Data stored in: $e_file"
-rm -f -r -d "$e_tempfolder"
+mv "${g_tempfolder}/tmp.tar.gz" "$tar_file"
+echo "Created archive in: $tar_file"
+rm -f -r -d "$g_tempfolder"
 
 exit 0
