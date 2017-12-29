@@ -64,7 +64,7 @@ TRACKNUMBER 1
 
 With this method I can order my music database in kodi by year and have an ordered discography but can chose one of my different versions.
 
-![alt text](https://github.com/thgoso/discogs-loader/blob/master/Bild.jpg)
+![alt text](https://github.com/thgoso/discogs-loader/blob/master/Image.jpg)
 
 
 # discogs_exportcollection
