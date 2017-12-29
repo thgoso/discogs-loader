@@ -1,0 +1,384 @@
+#!/bin/bash
+
+
+# Usage: navigate to a folder in which flac files from one discogs release are stored in
+# and start discogs_flactagger
+
+# You must enter the discogs release number and can tag flac files in folder
+
+# Copyright (C) 2015, Thomas Gollmer, th_goso@freenet.de
+# Dieses Programm ist freie Software. Sie können es unter den Bedingungen der GNU General Public License,
+# wie von der Free Software Foundation veröffentlicht, weitergeben und/oder modifizieren,
+# entweder gemäß Version 3 der Lizenz oder (nach Ihrer Option) jeder späteren Version.
+# Die Veröffentlichung dieses Programms erfolgt in der Hoffnung, daß es Ihnen von Nutzen sein wird,
+# aber OHNE IRGENDEINE GARANTIE, sogar ohne die implizite Garantie der
+# MARKTREIFE oder der VERWENDBARKEIT FÜR EINEN BESTIMMTEN ZWECK.
+# Details finden Sie in der GNU General Public License. Sie sollten ein Exemplar der GNU General Public License
+# zusammen mit diesem Programm erhalten haben. Falls nicht, siehe <http://www.gnu.org/licenses/>.
+
+#--------------------------------------------------------------------------------------------------------------------#
+function write_flacs
+{
+  # metadata will be write in a temp file
+  local tmp_file="flactagger-${g_relno}.tmp"
+  local show_cnt=0
+  local cnt=0
+
+  for ((cnt=0; cnt<g_num_lastfile; cnt++)) ; do
+    ((show_cnt++))
+    IFS=$'\n'
+    echo -e "Write metadata: \033[1;37m\033[47m${g_filelist[$cnt]}\033[0m"
+    # write in tmp-file
+    # single entries
+    echo "DISCOGS=$g_relno" > "$tmp_file"
+    echo "TRACKNUMBER=$show_cnt" >> "$tmp_file"
+    echo "ALBUM=$g_album" >> "$tmp_file"
+    echo "DATE=$g_year" >> "$tmp_file"
+    # multiple entries
+    echo "$g_genres" | awk -F "|" '{for (i=1;i<=NF;i++) print "GENRE="$i}' >> "$tmp_file"
+    # tracklist, title in col 3
+    echo "${g_tracklist[$cnt]}" | awk -F "|" '{print "TITLE="$3}' >> "$tmp_file"
+    # tracklist, artitsts from col 4 to end
+    echo "${g_tracklist[$cnt]}" | awk -F "|" '{for (i=4;i<=NF;i++) print "ARTIST="$i}' >> "$tmp_file"
+    local tmp_data=$(cat "$tmp_file" | sort | uniq)
+    echo "$tmp_data" > "$tmp_file"
+    # write metadata from temp-file into flac file
+    metaflac --remove-all --dont-use-padding "${g_filelist[$cnt]}"
+    metaflac --import-tags-from="$tmp_file" "${g_filelist[$cnt]}"
+  done
+  rm -f "$tmp_file"
+
+  # write replay gain in all files in folder
+  echo "Write replay gain..."
+  metaflac --add-replay-gain *.flac
+
+  # test all files in folder
+  echo "Test files..."
+  flac -t -s *.flac
+  local flactest=$(echo "$?")
+  if ! [ "$flactest" == "0" ] ; then
+    echo "ERROR in flac files !!!"
+    read -p "<ENTER> to Exit " get_num
+    IFS="$g_old_IFS"
+    exit 1
+  fi
+}
+#--------------------------------------------------------------------------------------------------------------------
+# make a sorted list "g_filelist[]" with all flac-files in working folder
+# index last file in "g_num_lastfile"
+function get_filelist {
+  local ffile=""
+  local ftype=""
+  unset local tmplist
+
+  IFS=$'\n'
+  local filelist=($(ls -1 *.flac 2> /dev/null))
+
+  for ffile in "${filelist[@]}" ; do
+    ftype=$(file -b -i "$ffile" | grep -i "flac")
+    if [ -n "$ftype" ] ; then
+      tmplist+=("$ffile")
+    fi
+  done
+
+  g_filelist=($(echo "${tmplist[*]}" | sort))
+  g_num_lastfile=$(echo "${#g_filelist[@]}")
+}
+#--------------------------------------------------------------------------------------------------------------------
+# let the user input release number
+# default is: tag "DISCOGS" in first file from filelist
+# sets global variable "g_relno"
+function get_relno {
+  g_relno=$(metaflac "${g_filelist[0]}" --show-tag "DISCOGS" | grep '[[:digit:]]*' -o)
+  read -ei "$g_relno" -p "Release : " g_relno
+}
+#--------------------------------------------------------------------------------------------------------------------
+# shows album title and let the user apply/change
+# title is in this format "Name [Year Art Form]"
+# where Year=release year ; Art=Vinyl, CD, MC, Misc ; Form=Album, Compilation, EP, Split, Single, Misc
+# sets global var "g_album"
+function get_album {
+  IFS=$'\n'
+
+  local album=$(echo "$g_reldata" | grep "^TITLE" | awk -F "\t" '{print $2}')
+  local year=$(echo "$g_reldata" | grep "^YEAR" | awk -F "\t" '{print $2}')
+  local formats=($(echo "$g_reldata" | grep "^FORMATS" | awk -F "\t" '{for (i=2; i<=NF; i++) print $i}'))
+  local art="Misc"
+  local format="Misc"
+  local val=""
+
+  for val in "${formats[@]}" ; do
+    if [ "$val" = "Vinyl" ] ; then art="Vinyl" ; fi
+    if [ "$val" = "CD" ] ; then art="CD" ; fi
+    if [ "$val" = "Cassette" ] ; then art="MC" ; fi
+    if [ "$val" = "LP" ] ; then art="Vinyl" ; fi
+    if [ "$val" = "EP" ] ; then format="EP" ; fi
+    if [ "$val" = "Album" ] ; then format="Album" ; fi
+    if [ "$val" = "Mini-Album" ] ; then format="Album" ; fi
+    if [ "$val" = "Maxi-Single" ] ; then format="Single" ; fi
+    if [ "$val" = "Single" ] ; then format="Single" ; fi
+    if [ "$val" = "Compilation" ] ; then format="Compilation" ; fi
+  done
+
+  g_album=$(echo "$album [$year $art $format]")
+  read -ei "$g_album" -p "Title   : " g_album
+}
+#--------------------------------------------------------------------------------------------------------------------
+# shows the year from master release... this is the year a release the first time came out
+# let the user apply/change
+# sets global var "g_year"
+function get_year {
+  g_year=$(echo "$g_reldata" | grep "^MASTERYEAR" | awk -F "\t" '{print $2}')
+  read -ei "$g_year" -p "Year    : " g_year
+}
+#--------------------------------------------------------------------------------------------------------------------
+# let the user apply/change genres
+# data will be stored in "g_genres" and genres are seperated by "|"
+function get_genres {
+  IFS=$'\n'
+  local tmp=($(echo "$g_reldata" | grep "^STYLES" | awk -F "\t" '{for (i=2; i<=NF; i++) print $i}'))
+  IFS="|"
+  g_genres=$(echo "${tmp[*]}")
+  read -ei "$g_genres" -p "Genres  : " g_genres
+}
+#--------------------------------------------------------------------------------------------------------------------
+# makes tracklist from "g_reldata", sets global vars "g_tracklist[]" and "g_num_lasttrack"
+function get_tracklist {
+  local cnt=0
+  local add=""
+
+  IFS=$'\n'
+  g_tracklist=($(echo "$g_reldata" | grep -E "^TRACK|^HEADING" | tr '\t' "|"))
+  # Index last track
+  g_num_lasttrack=$(echo "${#g_tracklist[@]}")
+  # fill tracklist if more flac files in folder, than tracks in list
+  if [ "$g_num_lastfile" -gt "$g_num_lasttrack" ] ; then
+    add=$((g_num_lastfile - g_num_lasttrack))
+    for ((cnt=0; cnt<add; cnt++)) ; do
+      g_tracklist+=("HEADING|--|--------|--------")
+    done
+  fi
+  g_num_lasttrack=$(echo "${#g_tracklist[@]}")
+}
+#--------------------------------------------------------------------------------------------------------------------
+# print current tracklist on top
+function show_tracklist
+{
+  local show_cnt=0
+  local cnt=0
+  local t_line=""
+  local t_head=""
+  local t_pos=""
+  local t_title=""
+  local t_artists=""
+
+  clear
+  echo -e "Track:\tPos\tFile\tArtists\tTitle"
+  for ((cnt=0; cnt<g_num_lasttrack; cnt++)) ; do
+    ((show_cnt++))
+
+    IFS=$'\n'
+    t_line="${g_tracklist[$cnt]}"
+    t_head=$(echo "$t_line" | awk -F "|" '{print $1}')
+    t_pos=$(echo "$t_line" | awk -F "|" '{print $2}')
+    t_title=$(echo "$t_line" | awk -F "|" '{print $3}')
+    t_artists=($(echo "$t_line" | awk -F "|" '{for (i=4;i<=NF;i++) print $i}'))
+    IFS="|"
+    if [ "$t_head" == "TRACK" ] ; then
+      echo -e -n "${show_cnt}\t${t_pos}\t\033[1;37m\033[41m${g_filelist[$cnt]}\033[0m\t"
+      echo -e "\033[1;37m\033[42m${t_artists[*]}\033[0m\t\033[1;37m\033[45m${t_title}\033[0m"
+    else
+      echo -e -n "${show_cnt}\t${t_pos}\t\033[1;37m\033[41m${g_filelist[$cnt]}\033[0m\t"
+      echo -e "\033[1;37m\033[42m${t_artists[*]}\033[0m\t\033[1;37m\033[47m${t_title}\033[0m"
+    fi
+  done
+  echo
+}
+#--------------------------------------------------------------------------------------------------------------------
+# delete track from list
+# Param = ArrayIndex
+function delete_track ()
+{
+  local tmp=("${g_tracklist[@]}")
+  local delnr="$1"
+  local cnt=0
+
+  IFS=$'\n'
+  unset g_tracklist
+  ((delnr--))
+
+  for ((cnt=0; cnt<g_num_lasttrack; cnt++)) ; do
+    if ! [ "$delnr" == "$cnt" ] ; then
+      g_tracklist+=("${tmp[$cnt]}")
+    fi
+  done
+
+  unset tmp
+  g_num_lasttrack=$(echo "${#g_tracklist[@]}")
+}
+#--------------------------------------------------------------------------------------------------------------------
+# delete all tracks with "--" in column 2 (headings)
+function delete_heading_tracks ()
+{
+  local tmp=("${g_tracklist[@]}")
+  local cnt=0
+
+  IFS=$'\n'
+  unset g_tracklist
+
+  for ((cnt=0; cnt<g_num_lasttrack; cnt++)) ; do
+    IFS=$'\n'
+    local t_line="${tmp[$cnt]}"
+    local t_pos=$(echo "$t_line" | awk -F "|" '{print $2}')
+    if ! [ "$t_pos" == "--" ] ; then
+      IFS="|"
+      g_tracklist+=("${t_line}")
+    fi
+  done
+
+  g_num_lasttrack=$(echo "${#g_tracklist[@]}")
+
+  # fill list if now there are more flac files in folder than in list
+  if [ "$g_num_lastfile" -gt "$g_num_lasttrack" ] ; then
+    local add=$((g_num_lastfile - g_num_lasttrack))
+    for ((cnt=0 ;cnt<add; cnt++)) ; do
+      g_tracklist+=("HEADING|--|--------|--------")
+    done
+  fi
+  g_num_lasttrack=$(echo "${#g_tracklist[@]}")
+}
+#--------------------------------------------------------------------------------------------------------------------
+# let the user edit tracklist
+function edit_tracklist
+{
+  local cnt=0
+  local show_cnt=0
+  local t_line=""
+  local t_art=""
+  local t_pos=""
+  local t_title=""
+  local t_artists=""
+  local tmp=""
+
+  clear
+  for ((cnt=0; cnt<g_num_lasttrack; cnt++)) ; do
+    ((show_cnt++))
+    IFS=$'\n'
+    t_line="${g_tracklist[$cnt]}"
+    t_art=$(echo "$t_line" | awk -F "|" '{print $1}')
+    t_pos=$(echo "$t_line" | awk -F "|" '{print $2}')
+    t_title=$(echo "$t_line" | awk -F "|" '{print $3}')
+    tmp=($(echo "$t_line" | awk -F "|" '{for (i=4;i<=NF;i++) print $i}'))
+    IFS="|"
+    t_artists=$(echo "${tmp[*]}")
+    read -ei "${t_artists}" -p "${g_filelist[$cnt]} Artists : " t_artists
+    read -ei "${t_title}" -p "${g_filelist[$cnt]} Title   : " t_title
+
+    g_tracklist[$cnt]="${t_art}|${t_pos}|${t_title}|${t_artists}"
+  done
+}
+#--------------------------------------------------------------------------------------------------------------------
+# download first release image from discogs, use convert to save as 600x600 "folder.jpg"
+# if image exists, do not download/overwrite
+function load_image {
+  local picurl=$(echo "$g_reldata" | grep "^PICURLS" | awk -F "\t" '{print $2}')
+
+  if [ -n "$picurl" ] ; then
+    if [ -e "folder.jpg" ] ; then
+      echo "\"folder.jpg\" already exists... no download"
+    else
+      echo "Save image as \"folder.jpg\""
+      curl --stderr /dev/null -H "Authorization: Discogs token=$k_discogs_token" --user-agent "$k_discogs_agent" \
+        --output "folder.jpg" --remote-name "$picurl"
+      convert "folder.jpg" -resize '600x600' "folder.jpg"
+    fi
+  fi
+}
+#--------------------------------------------------------------------------------------------------------------------
+# Main
+
+# global var
+# g_filelist[]               # all files in working folder, seperator="\n"
+# g_num_lastfile             # index last file in "g_filelist[]"
+# g_relno                    # discogs rlease number
+# g_reldata                  # release data in textform
+# g_album                    # album/release title
+# g_year                     # Year first release / masterrelease
+# g_genres                   # genres seperated by "|"
+# g_tracklist[]              # tracks seperated by "\n" field seperator ="|"
+                             # every item = "Form|Number|Name|Artist1|Artist2...."
+# g_num_lasttrack            # index last track in "g_tracklist[]"
+
+
+# Read default token from $HOME/.config/discogs-loader/discogs.conf
+if [ -e "$HOME/.config/discogs-loader/discogs.conf" ] ; then
+  k_discogs_token=$(cat "$HOME/.config/discogs-loader/discogs.conf" | awk '/^TOKEN/ {print $2}')
+else
+  k_discogs_token=""
+fi
+k_discogs_agent="github.com/thgoso/discogs-loader/"
+g_old_IFS="$IFS"
+
+
+echo "-------------------- DISCOGS FLAC TAGGER --------------------"
+echo "For genres and artists you can make more than olny one input."
+echo "Use | (Pipe) to seperate entries, like: genre1|genre2|genre3"
+echo "Now you need a discogs release number and than set the data."
+echo ""
+
+get_filelist
+if [ "$g_num_lastfile" -eq 0 ] ; then
+  echo "No flac-files in folder !"
+  read -p "<ENTER> to Exit " get_num
+  IFS="$g_old_IFS"
+  exit 1
+fi
+
+get_relno
+g_reldata=$(discogs_getreldata "$g_relno" "$k_discogs_token")
+get_album
+get_year
+get_genres
+get_tracklist
+show_tracklist
+
+while [ "$g_num_lastfile" -ne "$g_num_lasttrack" ] ; do
+  unset get_num
+  while [[ ! ${get_num} =~ ^[0-9]+$ ]] ; do
+      echo "There are more tracks in list than files in folder !"
+      echo "Enter a track number to delete this track."
+      read -p "<0> removes all the headings: " get_num
+  done
+  if [ "$get_num" == "0" ] ; then
+    delete_heading_tracks
+  else
+    delete_track "$get_num"
+  fi
+  show_tracklist
+done
+
+read -p "Exit[e] Change[c] Apply[any] " -n 1 retval
+if [ "$retval" == "e" ] ; then
+  echo
+  IFS="$g_old_IFS"
+  exit 1
+elif [ "$retval" == "c" ] ; then
+  edit_tracklist
+fi
+echo ""
+
+write_flacs
+load_image
+
+old_name=$(pwd)
+old_name=$(basename "$old_name")
+new_name=$(echo "$g_album" | tr "/" "-")
+if ! [ "$old_name" == "$new_name" ] ; then
+  echo -e "Rename folder \033[1;37m\033[47m${old_name}\033[0m into \033[1;37m\033[47m${new_name}\033[0m"
+  cd ..
+  mv "$old_name" "$new_name"
+fi
+
+read -p "Done, <ENTER> to Exit " get_num
+IFS="$g_old_IFS"
+exit 0

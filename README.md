@@ -25,13 +25,51 @@ If you are a registered discogs-user, you can create a token to get more informa
 
 To create your token, go to the discogs-homepage and log in. Navigate to settings... devellopers... generate token... thats it. Vistit *https://www.discogs.com/developers/* for further description of the discogs-api and *https://stedolan.github.io/jq/* to learn about the usage of jq.
 
+If you have your token and username create path/file in your home-folder:
+```
+$HOME/.config/discogs-loader/discogs.conf"
+```
+In this textfile insert your name, token in this form:
+```
+USER discogsmember007
+TOKEN AbCdEfGhIjKlMnOpQrStUvWxYz
+```
+
 
 # discogs_getreldata <- a little helper
 Loads all the data from a release and prints to stdout.
-- usage: discogs_getreldata release-no [OPTIONAL your discogs-token]
+- usage: discogs_getreldata release-no
+
+
+# discogs_flactagger
+You can tag your flac files in terminal and download an image from discogs.
+- usage: navigate to a folder with flac files and start *discogs_flactagger*
+If you want to use this, please install (if not):
+```
+sudo apt-get install imagemagick flac 
+```
+Flac files in folder must be named cronological: "01.flac" "02.flac" "03.flac" or something like this. You must know your release number from discogs.
+
+I have several versions from one release such as "Metallica - Kill 'em all" from vinyl, cd, cd repress from 2017. So my method to tag flac files is:
+```
+ARTIST      Metallica
+ALBUM       Kill 'Em All [2003 Vinyl Album]
+DATE        1983
+GENRE       Thrash
+GENRE       Speed Metal
+TITLE       Hit The Lights
+TRACKNUMBER 1
+```
+2003 in ALBUM means the release year from THIS release, 1983 in DATE means 1983 was the master release year... first time. In Album I have two other fields in [] Vinyl and Album, where this can be: Vinyl, CD, MC, Misc ; Album, Single, EP, Compilation, Misc.
+
+With this method I can order my music database in kodi by year and have an ordered discography but can chose one of my different versions.
+
+![alt text](https://github.com/thgoso/discogs-loader/blob/master/Bild.jpg)
+
 
 # discogs_exportcollection
 Just start it without any parameters and you can download your own collection data, custom-fields, folder-infos, user-infos or any other user-collection, wantlist if it is public. Data will be exported in json-formated text and stored in a tar.gz file in your home folder.
+
 
 # discogs_importcollection
 If you have downloaded your or any other collection with discogs_exportcollection, now you need this script to upload local data to your discogs-account. You can upload:

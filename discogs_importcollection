@@ -46,11 +46,11 @@ function add_release_to_folder () {
       -m 30 \
       -A "$g_agent" \
       -H "Authorization: Discogs token=$g_usertoken" \
-      -X POST "$g_page/users/$g_username/collection/folders/$1/releases/$2")      
+      -X POST "$g_page/users/$g_username/collection/folders/$1/releases/$2")
     # check server response ... must be 201
     local response=$(echo "$retval" | grep "^HTTP/1.1 201")
     # on success, get the instance-id from retval
-    if [ -n "$response" ] ; then 
+    if [ -n "$response" ] ; then
       local inst_id=$(echo "$retval" | grep "^{\"instance_id\":" | jq -r '.instance_id')
       break
     fi
@@ -63,7 +63,7 @@ function add_release_to_folder () {
   g_ratelimit=$(echo "$retval" | grep -o "X-Discogs-Ratelimit-Remaining: [[:digit:]]*" | awk '{print $2}')
 
   # check several errors, on error return 0 in stdout
-  if [ "$upl_cnt" -eq 0 ] || [ "$inst_id" = "null" ] || [ -z "$inst_id" ] || [ "$inst_id" = "0" ] ; then 
+  if [ "$upl_cnt" -eq 0 ] || [ "$inst_id" = "null" ] || [ -z "$inst_id" ] || [ "$inst_id" = "0" ] ; then
     echo "0"
   else
     echo "$inst_id"
@@ -100,7 +100,7 @@ function write_one_custom () {
     # on error wait a seconds before new upload
     sleep 1
   done
-  
+
   # get new val for g_ratelimit from HTTP header
   g_ratelimit=$(echo "$retval" | grep -o "X-Discogs-Ratelimit-Remaining: [[:digit:]]*" | awk '{print $2}')
 
@@ -304,7 +304,7 @@ function do_upload {
         for ((cur_release_index=0; cur_release_index<cur_releases_in_page; cur_release_index++)) ; do
           cur_release_data=$(cat "$cur_file" | jq ".wants[$cur_release_index]")
           ((cur_upload_cnt++))
-          upload_release_to_wantlist "$cur_upload_cnt" "$cur_release_data" 
+          upload_release_to_wantlist "$cur_upload_cnt" "$cur_release_data"
         done
       done
 
@@ -318,7 +318,7 @@ function do_upload {
         for ((cur_release_index=0; cur_release_index<cur_releases_in_page; cur_release_index++)) ; do
           cur_release_data=$(cat "$cur_file" | jq ".wants[$cur_release_index]")
           ((cur_upload_cnt++))
-          upload_release_to_folder "$cur_upload_cnt" "$cur_folder_id_dest" "$cur_release_data" 
+          upload_release_to_folder "$cur_upload_cnt" "$cur_folder_id_dest" "$cur_release_data"
         done
       done
 
@@ -332,7 +332,7 @@ function do_upload {
         for ((cur_release_index=0; cur_release_index<cur_releases_in_page; cur_release_index++)) ; do
           cur_release_data=$(cat "$cur_file" | jq ".releases[$cur_release_index]")
           ((cur_upload_cnt++))
-          upload_release_to_wantlist "$cur_upload_cnt" "$cur_release_data" 
+          upload_release_to_wantlist "$cur_upload_cnt" "$cur_release_data"
         done
       done
 
@@ -384,8 +384,16 @@ function get_input_data {
   echo "Enter full path/filename of your local discogs-export-file."
 
   local filename=""
-  read -p "user-name: " g_username
-  read -p "user-token: " g_usertoken
+  # Read default username, token from $HOME/.config/discogs-loader/discogs.conf
+  if [ -e "$HOME/.config/discogs-loader/discogs.conf" ] ; then
+    g_username=$(cat "$HOME/.config/discogs-loader/discogs.conf" | awk '/^USER/ {print $2}')
+    g_usertoken=$(cat "$HOME/.config/discogs-loader/discogs.conf" | awk '/^TOKEN/ {print $2}')
+  else
+    g_username=""
+    g_usertoken=""
+  fi
+  read -ei "$g_username" -p "user-name: " g_username
+  read -ei "$g_usertoken" -p "user-token: " g_usertoken
   read -p "input-file full path/name: " filename
 
   echo "Read input file..."

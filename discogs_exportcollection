@@ -171,8 +171,17 @@ echo "--------------------------- DISCOGS EXPORT ----------------------------"
 echo "Enter user-name and user-token if you are the owner of the collection."
 echo "You can also read data from other users, if the collection is public."
 echo "In this case only enter the user-name and press <ENTER> for user-token."
-read -p "user-name: " g_username
-read -p "user-token: " g_usertoken
+
+# Read default username, token from $HOME/.config/discogs-loader/discogs.conf
+if [ -e "$HOME/.config/discogs-loader/discogs.conf" ] ; then
+  g_username=$(cat "$HOME/.config/discogs-loader/discogs.conf" | awk '/^USER/ {print $2}')
+  g_usertoken=$(cat "$HOME/.config/discogs-loader/discogs.conf" | awk '/^TOKEN/ {print $2}')
+else
+  g_username=""
+  g_usertoken=""
+fi
+read -ei "$g_username" -p "user-name: " g_username
+read -ei "$g_usertoken" -p "user-token: " g_usertoken
 
 if [ -z "$g_usertoken" ] ; then
   g_sleeptime="3"

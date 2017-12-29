@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Download/show release-data from discogs.com
-# Usage: discogs_getreldata rel-no [OPTIONAL your-discogs-token]
+# Usage: discogs_getreldata rel-no
 # prints out release-data to stdout
-# if you use the optional param "your-discogs-token"
+# if you have a discogs token in "$HOME/.config/discogs-loader/discogs.conf" defined
 # you will see the picture-url's too
 
 # Copyright (C) 2016-2017 Thomas Gollmer, th_goso@freenet.de
@@ -16,12 +16,12 @@
 # Details finden Sie in der GNU General Public License. Sie sollten ein Exemplar der GNU General Public License
 # zusammen mit diesem Programm erhalten haben. Falls nicht, siehe <http://www.gnu.org/licenses/>.
 
-
 # output format: (seperator = TAB)
 
 # DISCOGS      12345
 # TITLE        title
 # YEAR         2000
+# MASTERYEAR   1995
 # MAINARTISTS  artist1      artist2       ...
 # LABELS       label1       label2        ...
 # FORMATS      CD           Box-Set       ...
@@ -98,7 +98,8 @@ function show_formats
   local tmp2=$(echo "$g_reldata" | jq -r '.formats[].descriptions[0]')
 
   if ! [ "$tmp2" == "null" ] ; then
-    tmp2=($(echo "$g_reldata" | jq -r '.formats[].descriptions[]'))
+    unset tmp2
+    local tmp2=($(echo "$g_reldata" | jq -r '.formats[].descriptions[]' 2> /dev/null))
   fi
   IFS="$g_sep"
   if [ -n "${tmp2[0]}" ] ; then
@@ -108,13 +109,25 @@ function show_formats
   fi
 }
 # ------------------------------------------------------------------------------------------------------------------
-# show release year
+# show release year and release year from master-release (if there is any)
 function show_year
 {
-  local tmp=$(echo "$g_reldata" | jq -r '.released')
-  if ! [ "$tmp" == "null" ] ; then
-    tmp=$(echo "$g_reldata" | jq -r '.released' | awk '{print substr($0, 1, 4)}')
-    echo -e "YEAR$g_sep$tmp"
+  local ryear=""
+  local myear=""
+  local tmp=""
+
+  # year from release
+  ryear=$(echo "$g_reldata" | jq -r '.year')
+  echo -e "YEAR$g_sep$ryear"
+
+  # year from main-release (if exists)
+  tmp=$(echo "$g_reldata" | jq -r '.master_url')
+  if ! [ "$tmp" = "null" ] ; then
+    tmp=$(curl --stderr /dev/null -A "$g_agent" "$tmp")
+    myear=$(echo "$tmp" | jq -r '.year')
+    echo -e "MASTERYEAR$g_sep$myear"
+  else
+    echo -e "MASTERYEAR$g_sep$ryear"
   fi
 }
 # ------------------------------------------------------------------------------------------------------------------
@@ -231,12 +244,21 @@ g_relpage="https://api.discogs.com/releases"
 g_reldata=""
 g_mainartists=""
 
+
+
+# Read token from $HOME/.config/discogs-loader/discogs.conf
+if [ -e "$HOME/.config/discogs-loader/discogs.conf" ] ; then
+  g_usertoken=$(cat "$HOME/.config/discogs-loader/discogs.conf" | awk '/^TOKEN/ {print $2}')
+else
+  g_usertoken=""
+fi
+
 # check first commandline param rel-no
 if $(echo "$1" | grep -q '^[0-9]\+$'); then
   #load data into global var "g_reldata"
-  get_reldata "$1" "$2"
+  get_reldata "$1" "$g_usertoken"
 else
-  echo "Usage: discogs_getreldata releasenumber [token]" >&2
+  echo "Usage: discogs_getreldata releasenumber" >&2
   exit 1
 fi
 
