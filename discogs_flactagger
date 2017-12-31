@@ -102,6 +102,7 @@ function get_album {
 
   local album=$(echo "$g_reldata" | grep "^TITLE" | awk -F "\t" '{print $2}')
   local year=$(echo "$g_reldata" | grep "^YEAR" | awk -F "\t" '{print $2}')
+  if [ "$year" = "0" ] ; then year="????" ; fi
   local formats=($(echo "$g_reldata" | grep "^FORMATS" | awk -F "\t" '{for (i=2; i<=NF; i++) print $i}'))
   local art="Misc"
   local format="Misc"
