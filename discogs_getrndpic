@@ -4,9 +4,9 @@
 # Usage: discogs_getrndpic "folder-name" "local-file-path/name.type" "picture-size"
 # 
 # folder-name                 <-- "All" or "Uncategorized" or "Wantlist" or any existing "folder-name"
-# local-file-path/name.type   <-- filepath/name.type --> "./mypic.png"
+# local-file-path/name.type   <-- filepath/name.type --> "$HOME/mypic.png"
 #                                                    --> "/home/username/picture.jpg"
-#                                                    --> "/temp/picture.gif"
+#                                                    --> "/tmp/picture.gif"
 #                                                         or any other type that "convert" knows
 # picture-size                <-- max size           --> "600"
 #                                                         if discogs-picture is "500x500", local pic = 600x600
@@ -249,7 +249,7 @@ while ((1)) ; do
   echo "Random release: $relno"
   # grab picture-url for release
   picurl=$(get_picurl "$relno")
-  if [ -z "picurl" ] ; then
+  if [ -z "$picurl" ] ; then
     echo "Picture-URL: empty"
     continue
   else
