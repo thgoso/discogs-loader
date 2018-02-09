@@ -8,7 +8,8 @@ fi
 for file in "discogs_exportcollection" \
             "discogs_importcollection" \
             "discogs_getreldata" \
-            "discogs_flactagger" ; do
+            "discogs_flactagger" \
+            "discogs_getrndpic" ; do
 
   echo "install: /usr/local/bin/$file"
   cp "$file" "/usr/local/bin/$file"
