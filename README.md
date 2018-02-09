@@ -53,13 +53,17 @@ Download a random cover image from items in your collection or wantlist.
     - "Wantlist" to get an image from your wantlist items
     - "folder-name" to get an image from items in folder called "folder-name" in your collection
   - local-file-path/name.type (existing file will be overwritten)
-    - "./mypic.png" download picture in format .png to working folder
-    - "/home/username/picture.jpg" download in format .jpg to your home folder
+    - "$HOME/picture.jpg" download in format .jpg to your home folder
     - "/tmp/picture.gif" save in tmp-folder as gif-file
+    - you can use any file-type that convert knows
   - picture-size: for example "600"
     - if discogs-picture is "500x500", local pic = 600x600
     - if discogs-picture is "400x500", local pic = 480x600
     - if discogs-picture is "500x400", local pic = 600x480
+```
+discogs_getrndpic "my-folder" "$HOME/image.png" "600"
+```
+Download random picture from discogs-folder "my-folder" to home-folder in format .png with size 600  
 
 # discogs_flactagger
 You can tag your flac files in terminal and download an image from discogs.
