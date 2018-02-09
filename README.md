@@ -40,6 +40,26 @@ TOKEN AbCdEfGhIjKlMnOpQrStUvWxYz
 Loads all the data from a release and prints to stdout.
 - usage: discogs_getreldata release-no
 
+# discogs_getrndpic
+You need "convert" from "imagemagick"
+```
+sudo apt-get install imagemagick
+```
+Download a random cover image from items in your collection or wantlist.
+- usage: discogs_getrndpic "folder-name" "local-file-path/name.type" "picture-size"
+  - folder-name:
+    - "All" to get an image from any item in your collection
+    - "Uncategorized" to get an image from items in folder "Uncategorized" in your collection
+    - "Wantlist" to get an image from your wantlist items
+    - "folder-name" to get an image from items in folder called "folder-name" in your collection
+  - local-file-path/name.type (existing file will be overwritten)
+    - "./mypic.png" download picture in format .png to working folder
+    - "/home/username/picture.jpg" download in format .jpg to your home folder
+    - "/tmp/picture.gif" save in tmp-folder as gif-file
+  - picture-size: for example "600"
+    - if discogs-picture is "500x500", local pic = 600x600
+    - if discogs-picture is "400x500", local pic = 480x600
+    - if discogs-picture is "500x400", local pic = 600x480
 
 # discogs_flactagger
 You can tag your flac files in terminal and download an image from discogs.

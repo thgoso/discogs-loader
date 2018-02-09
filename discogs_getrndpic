@@ -1,0 +1,267 @@
+#!/bin/bash
+
+# Download random cover-picture from your discogs-collection or wantlist
+# Usage: discogs_getrndpic "folder-name" "local-file-path/name.type" "picture-size"
+# 
+# folder-name                 <-- "All" or "Uncategorized" or "Wantlist" or any existing "folder-name"
+# local-file-path/name.type   <-- filepath/name.type --> "./mypic.png"
+#                                                    --> "/home/username/picture.jpg"
+#                                                    --> "/temp/picture.gif"
+#                                                         or any other type that "convert" knows
+# picture-size                <-- max size           --> "600"
+#                                                         if discogs-picture is "500x500", local pic = 600x600
+#                                                         if discogs-picture is "400x500", local pic = 480x600
+#                                                         if discogs-picture is "500x400", local pic = 600x480
+#
+#
+# Copyright (C) 2016-2017 Thomas Gollmer, th_goso@freenet.de
+# Dieses Programm ist freie Software. Sie können es unter den Bedingungen der GNU General Public License,
+# wie von der Free Software Foundation veröffentlicht, weitergeben und/oder modifizieren,
+# entweder gemäß Version 3 der Lizenz oder (nach Ihrer Option) jeder späteren Version.
+# Die Veröffentlichung dieses Programms erfolgt in der Hoffnung, daß es Ihnen von Nutzen sein wird,
+# aber OHNE IRGENDEINE GARANTIE, sogar ohne die implizite Garantie der
+# MARKTREIFE oder der VERWENDBARKEIT FÜR EINEN BESTIMMTEN ZWECK.
+# Details finden Sie in der GNU General Public License. Sie sollten ein Exemplar der GNU General Public License
+# zusammen mit diesem Programm erhalten haben. Falls nicht, siehe <http://www.gnu.org/licenses/>.
+
+# ------------------------------------------------------------------------------------------------------------------
+# load userdata/folders from discogs and print in stdout the folder-id for a given folder-name
+# param: FOLDER-NAME
+# return: folder-id
+# on error return "-1"
+function get_folderid_from_foldername() {
+  local data retval names ids cnt num
+
+  data=$(curl --stderr /dev/null -A "$g_agent" "$g_userpage/$g_username/collection/folders" \
+                                 -H "Authorization: Discogs token=$g_usertoken")
+  retval="$?"
+
+  # on error connecting
+  if ! [ "$retval" = "0" ] ; then
+    echo "-1"
+    return
+  fi
+
+  # grab all folder numbers, names
+  names=($(echo "$data" | jq -r '.folders[].name'))
+  ids=($(echo "$data" | jq -r '.folders[].id'))
+  
+  # search for folder with given name
+  num=${#names[@]}
+  for ((cnt=0; cnt<num; cnt++)) ; do
+    if [ "${names[$cnt]}" = "$1" ] ; then
+      echo "${ids[$cnt]}"
+      return
+    fi
+  done
+
+  # on error given folder does not exists
+  echo "-1"
+}
+# ------------------------------------------------------------------------------------------------------------------
+# load userdata/folders from discogs and print in stdout number of items in folder for a given folder-id
+# param: FOLDER-ID
+# return: number of items in folder
+# on error return "-1"
+function get_foldercount_from_folderid() {
+  local data retval counts ids cnt num
+
+  data=$(curl --stderr /dev/null -A "$g_agent" "$g_userpage/$g_username/collection/folders" \
+                                 -H "Authorization: Discogs token=$g_usertoken")
+  retval="$?"
+
+  # on error connecting
+  if ! [ "$retval" = "0" ] ; then
+    echo "-1"
+    return
+  fi
+
+  # grab all folder numbers, names
+  counts=($(echo "$data" | jq -r '.folders[].count'))
+  ids=($(echo "$data" | jq -r '.folders[].id'))
+  
+  # search for folder with given name
+  num=${#counts[@]}
+  for ((cnt=0; cnt<num; cnt++)) ; do
+    if [ "${ids[$cnt]}" = "$1" ] ; then
+      echo "${counts[$cnt]}"
+      return
+    fi
+  done
+
+  # on error given folder does not exists
+  echo "-1"
+}
+# ------------------------------------------------------------------------------------------------------------------
+# load userdata from discogs and print in stdout number of items in wantlist
+# return: number of items in wantlist
+# on error return "-1"
+function get_wantlistcount {
+  local data retval
+
+  data=$(curl --stderr /dev/null -A "$g_agent" "$g_userpage/$g_username" -H "Authorization: Discogs token=$2")
+  retval="$?"
+
+  # on error connecting
+  if ! [ "$retval" = "0" ] ; then
+    echo "-1"
+    return
+  fi
+
+  # get num_wantlist, if empty string return = "-1"
+  retval=$(echo "$data" | jq -r '.num_wantlist')
+  if [ -z "$retval" ] ; then retval="-1" ; fi
+  echo "$retval"
+}
+# ------------------------------------------------------------------------------------------------------------------
+# get a random release-number from a given user-folder-id or "w" for Wantlist
+# param: "folder-id" "folder-count" <-- for random release from collection folder
+# param: "w" "wantlist-count"       <-- for random release from user wantlist
+# return: random-release-number in stdout
+function get_rnd_relno() {
+  local idlist rnd rnd_page rnd_item rnd_id
+
+  # make random number between 1 and "$2"
+  rnd=$(echo $(($RANDOM % $2 + 1)))
+  # split number to page-number and item-number
+  rnd_page=$(($rnd / 25))
+  rnd_item=$(($rnd % 25 - 1))
+
+  if [ "$1" = "w" ] ; then
+    # load random rel-no from folder
+    idlist=($(curl --stderr /dev/null \
+      -A "$g_agent" "$g_userpage/$g_username/wants?per_page=25&page=$rnd_page" \
+      -H "Authorization: Discogs token=$g_usertoken" | jq '.wants[].id'))
+    rnd_id="${idlist[$rnd_item]}"
+  else
+    # load random rel-no from wantlist
+    idlist=($(curl --stderr /dev/null \
+      -A "$g_agent" "$g_userpage/$g_username/collection/folders/$1/releases?per_page=25&page=$rnd_page" \
+      -H "Authorization: Discogs token=$g_usertoken" | jq '.releases[].id'))
+    rnd_id="${idlist[$rnd_item]}"
+  fi
+  
+  echo "$rnd_id"
+}
+# ------------------------------------------------------------------------------------------------------------------
+# get picture-url from a given release-number
+# param: discogs-relno
+# return: url for FIRST picture from release (mostly release cover)
+#         if release has no pictures returns ""
+function get_picurl() {
+  local data pic
+
+  data=$(curl --stderr /dev/null -A "$g_agent" "$g_relpage/$1" -H "Authorization: Discogs token=$g_usertoken")
+  pic=$(echo "$data" | jq -r '.images[0].resource_url' | grep "^https://img.discogs.com") 
+
+  echo "$pic"
+}
+# ------------------------------------------------------------------------------------------------------------------
+# download discogs-picture and save local
+# param: picture-url local-file-path/name.type pic-size
+function download_picture() {
+  rm -f "$2"
+  curl --stderr /dev/null -H "Authorization: Discogs token=$g_usertoken" \
+    --user-agent "$g_agent" \
+    --output "$2" --remote-name "$1"
+
+  convert "$2" -resize "$3x$3" "$2"
+}
+# ------------------------------------------------------------------------------------------------------------------
+# main
+
+# global Variables
+g_oldifs="$IFS"
+g_agent="github.com/thgoso/discogs-loader/"
+g_relpage="https://api.discogs.com/releases"
+g_userpage="https://api.discogs.com/users"
+g_usertoken=""
+g_username=""
+
+IFS=$'\n'
+
+# Read token, username from $HOME/.config/discogs-loader/discogs.conf into global variables
+if [ -e "$HOME/.config/discogs-loader/discogs.conf" ] ; then
+  g_usertoken=$(cat "$HOME/.config/discogs-loader/discogs.conf" | awk '/^TOKEN/ {print $2}')
+  g_username=$(cat "$HOME/.config/discogs-loader/discogs.conf" | awk '/^USER/ {print $2}')
+else
+  echo "$HOME/.config/discogs-loader/discogs.conf does not exists!"
+  IFS="$g_oldifs"
+  exit 1
+fi
+
+# default param if params are empty
+if [ -z "$1" ] ; then
+  from="All"
+else
+  from="$1"
+fi
+if [ -z "$2" ] ; then
+  name="$HOME/discogs-rnd-picture.png"
+else
+  name="$2"
+fi
+if [ -z "$3" ] ; then
+  size="600"
+else
+  size="$3"
+fi
+
+# get wantlist-count, show info, set $count and $id
+if [ "$from" = "Wantlist" ] ; then
+  count=$(get_wantlistcount)
+  if [ "$count" = "-1" ] ; then
+    echo "Error: Wantlist does not exists!"
+    IFS="$g_oldifs"
+    exit 1
+  elif [ "$count" = "0" ] ; then
+    echo "Wantlist is empty, no random pictures to download"
+    IFS="$g_oldifs"
+    exit 1
+  fi
+  id="w"
+  echo "Wantlist items: $count"
+# get folder-id, folder-count, show info, set $count and $id
+else
+  id=$(get_folderid_from_foldername "$from")
+  if [ "$id" = "-1" ] ; then
+    echo "Error: folder '$from' does not exists!"
+    IFS="$g_oldifs"
+    exit 1
+  fi
+  count=$(get_foldercount_from_folderid "$id")
+  if [ "$count" = "-1" ] ; then
+    echo "Error: folder '$from' does not exists!"
+    IFS="$g_oldifs"
+    exit 1
+  elif [ "$count" = "0" ] ; then
+    echo "Folder: '$from' is empty, no random pictures to download"
+    IFS="$g_oldifs"
+    exit 1
+  fi
+  echo "Folder items: $count"
+fi
+
+# not all releases have images, so we try until we get an pic-url
+while ((1)) ; do
+  # get random-release-number from folder or wantlist, show info
+  relno=$(get_rnd_relno "$id" "$count")
+  echo "Random release: $relno"
+  # grab picture-url for release
+  picurl=$(get_picurl "$relno")
+  if [ -z "picurl" ] ; then
+    echo "Picture-URL: empty"
+    continue
+  else
+    echo "Picture-URL: $picurl"
+    break
+  fi
+done
+
+# donwload picture and convert to name.type, size
+download_picture "$picurl" "$name" "$size"
+echo "Local picture: $name"
+
+# restore
+IFS="$g_oldifs"
+exit 0
